@@ -28,7 +28,7 @@ OperatingSystem = sys.platform
 
 
 # Stage One = Sorting Out Program Dependencies Folder
-if OperatingSystem == "linux" or OperatingSystem == "linux2":
+if OperatingSystem in ["linux","linux2"]:
     print('Linux Operating System Detected')
 
     if os.path.isdir("./Tool_Dependancies_Mac") == True:
@@ -50,6 +50,10 @@ elif OperatingSystem == "win32" or 'win64':
     print('Windows Operating System Detected\n\
     This is not supported.\n')
     sys.exit()
+
+
+subprocess.run('chmod u+x ./Tool_Dependancies/clustalo',shell=True)
+
 
 # Stage Two = File Presence
 NecessaryFilePaths = ['PrimedRPA.py',
