@@ -7,7 +7,6 @@ PackList = ['os','shutil','sys','pandas',
             'datetime','random','numpy']
 
 
-
 # Checking Package Installation and if not present install
 for DepPack in PackList:
     try:
@@ -51,8 +50,8 @@ elif OperatingSystem == "win32" or 'win64':
     This is not supported.\n')
     sys.exit()
 
-
-subprocess.run('chmod u+x ./Tool_Dependancies/clustalo',shell=True)
+for dp in ['clustalo','blastn','makeblastdb']:
+    subprocess.run('chmod u+x ./Tool_Dependancies/{}'.format(dp),shell=True)
 
 
 # Stage Two = File Presence
@@ -115,7 +114,7 @@ else:
     print('Validation 1 Failed\nInstallation Exit')
     sys.exit()
 
-FilesToRemove = ['Validation_1_PrimedRPA_Output.csv','Validation_1_PrimedRPA_Primer_Binding_Sites.csv']
+FilesToRemove = ['Validation_1_PrimedRPA_Output.csv']
 for i in FilesToRemove:
     if os.path.exists(i):
         os.remove(i)
