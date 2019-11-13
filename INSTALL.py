@@ -1,4 +1,5 @@
 #! /usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import subprocess
 
@@ -42,7 +43,6 @@ elif OperatingSystem == "darwin":
     if os.path.isdir("./Tool_Dependancies_Linux") == True:
         shutil.rmtree('./Tool_Dependancies_Linux')
         subprocess.run('mv Tool_Dependancies_Mac Tool_Dependancies',shell=True)
-    #os.rename('Tool_Dependancies_Mac','Tool_Dependancies')
     AliasFile = 'bash_profile'
 
 elif OperatingSystem == "win32" or 'win64':
@@ -74,8 +74,6 @@ subprocess.run('cp ~/.{0} ~/.{0}_Prior_PrimedRPA'.format(AliasFile),shell=True)
 subprocess.run('echo alias PrimedRPA="{0}/PrimedRPA.py" >> ~/.{1}'.format(PrimedRPAPath,AliasFile),shell=True)
 
 # Stage Four Triggure basic Validation.
-subprocess.run('source ~/.{}'.format(AliasFile),shell=True)
-
 ValidationCommand = './PrimedRPA.py ./Validation/Validation_1_PrimedRPA_Parameters.txt'
 
 try:
