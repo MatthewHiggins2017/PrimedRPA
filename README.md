@@ -9,24 +9,17 @@ Python 3+
 
 ### Installation
 
-Download a zipped copy of this repository.
+Download and unzip a copy of this repository using the green button towards the top right-hand corner of this page.
 
-Unzip the repository using the following command:
-
-```
-unzip PrimedRPA.zip
-```
 
 Navigate inside the PrimedRPA directory and trigger the installation process:
 
 ```
-cd ./PrimedRPA
+cd ./PrimedRPA-master
 python INSTALL.py
 ```
 
-During the installation process a Yes or No prompt will arise regarding the saving
-of validation primers. Please proceed as desired.
-
+During the installation process a Yes or No prompt will arise regarding the saving of validation primers. Please proceed as desired.
 
 Once the installation script is complete please source the newly added PrimedRPA alias as follows:
 
