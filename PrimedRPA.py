@@ -290,7 +290,6 @@ def BlastnBackgroundCheck(PrimerProbeSetList,
 						  RunReferenceName):
 
 
-
 	MaxBackgroundScoreBindingScore = 0
 
 	for seq in PrimerProbeSetList:

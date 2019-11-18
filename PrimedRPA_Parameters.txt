@@ -1,7 +1,7 @@
 This parameters file will guide the PrimedRPA-based primer and probe design process. Please follow the instructions outlined below:
 
 ----####----
-Important Note - Do not remove any of the “>” and write your input directly after this symbol ensuring there are no spaces between “>” and your text.
+Important Note - Do not remove any of the “>” and write your input directly after this symbol.
 ----####----
 
 
