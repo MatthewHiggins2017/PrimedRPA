@@ -5,7 +5,7 @@ A python-based command-line package to augment primer and probe design for Recom
 
 ### Prerequisites
 
-Python 3+
+Python 3.5 +
 
 ### Installation
 
