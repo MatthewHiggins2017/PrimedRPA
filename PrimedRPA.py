@@ -25,7 +25,7 @@ import datetime
 import random
 import numpy
 import pandas as pd
-
+from collections import Counter
 
 # Wrapper for clustal omega
 def RunningClustalo1(ClustalOPath,
@@ -117,11 +117,13 @@ def CheckingAlignedOutputFile(Targetsequencefile,
 			NRepresentation = -100 #Harsh weighting against splits
 
 		else:
-			MostCommonN = max(set(TempNucleotides), key=TempNucleotides.count)
+			BugFix = Counter(TempNucleotides)
+			MostCommonN = max(TempNucleotides, key=BugFix.get)
+
 			if MostCommonN == '-':
 				NRepresentation = -100 #Harsh weighting against splits
 			else:
-				NRepresentation = TempNucleotides.count(MostCommonN)/len(list(set(TempNucleotides)))
+				NRepresentation = TempNucleotides.count(MostCommonN)/len(TempNucleotides)
 
 
 		AlignedDF = AlignedDF.append({'Index_Pos':seqindex,'Nucleotide':MostCommonN,'Abundance':NRepresentation},ignore_index=True)
