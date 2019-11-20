@@ -41,3 +41,5 @@ set up your first Primer / Probe search.
 ### Note
 
 Further instruction regarding the use of the PrimedRPA and example run files will be uploaded soon.
+
+If you encounter any bugs please contact me directly at **matthew.higgins[at]lshtm.ac.uk**
