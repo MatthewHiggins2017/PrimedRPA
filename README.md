@@ -40,6 +40,6 @@ set up your first Primer / Probe search.
 
 ### Note
 
-Further instruction regarding the use of the PrimedRPA and example run files will be uploaded soon.
+Please see the link below for a guided walk-through of the PrimedRPA primer design process: https://github.com/MatthewHiggins2017/PrimedRPA/wiki/Example-Run
 
 If you encounter any bugs please contact me directly at **matthew.higgins[at]lshtm.ac.uk**
