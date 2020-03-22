@@ -44,7 +44,7 @@ def getComplement(seq,
 				 rule='N2N'):
 
 	seqComp = ""
-	for base in seq:
+	for base in seq.upper():
 		base = base.upper()
 		if base == "A":
 			seqComp += "T"
@@ -88,7 +88,7 @@ def CheckingAlignedOutputFile(Targetsequencefile,
 					fastadict[active_sequence_name] = ''
 				continue
 			sequence = line
-			fastadict[active_sequence_name] += sequence
+			fastadict[active_sequence_name] += sequence.upper()
 
 
 	FirstSeq = True
