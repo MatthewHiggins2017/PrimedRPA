@@ -96,6 +96,6 @@ for i in FilesToRemove:
     if os.path.exists(i):
         os.remove(i)
 
-shutil.rmtree('./VALIDATION_1_BACKGROUND_Blastn_DB_PrimedRPA')
+shutil.rmtree('./Validation_1_Background_Blastn_DB_PrimedRPA')
 
 print('Installation Successfully Complete')
