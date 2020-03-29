@@ -53,7 +53,7 @@ For each PrimedRPA run the following 3 key files are generated:
 
 Please see the wiki for more information, including a step-by-step walk through of using the software.
 
-## 3rd-Party Software
+### 3rd-Party Software
 
 PrimerRPA incoporates the following 3rd party software:
 
