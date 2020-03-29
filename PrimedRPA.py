@@ -530,9 +530,15 @@ def CheckingAlignedOutputFile(AllParameter):
 
 
 
-		if (len(PrimerPassedSubet)==0 or len(ProbePassedSubet)==0 or len(PassedOligos) == 0):
+		##Check If No Primers Passed Subset
+		if len(PrimerPassedSubet)==0:
 			print('No Oligos Passed Filtering')
 			sys.exit()
+
+		if AllParameter.ProbeRequired!='NO':
+			if len(ProbePassedSubet)==0:
+				print('No Oligos Passed Filtering')
+				sys.exit()
 
 
 	#Create Binding DataFrame If It Doesnt Exist
