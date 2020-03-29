@@ -31,7 +31,7 @@ source ~/.bash_profile
 source ~/.bashrc
 
 # Call the software
-PrimedRPA
+PrimedRPA --help
 
 ```
 
