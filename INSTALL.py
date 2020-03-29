@@ -5,7 +5,7 @@ import subprocess
 
 PackList = ['os','shutil','sys','pandas',
             'math','glob','time','itertools',
-            'datetime','random','numpy']
+            'datetime','random','numpy','multiprocess']
 
 
 # Checking Package Installation and if not present install
@@ -74,49 +74,28 @@ subprocess.run('cp ~/.{0} ~/.{0}_Prior_PrimedRPA'.format(AliasFile),shell=True)
 subprocess.run('echo alias PrimedRPA="{0}/PrimedRPA.py" >> ~/.{1}'.format(PrimedRPAPath,AliasFile),shell=True)
 
 # Stage Four Triggure basic Validation.
-ValidationCommand = './PrimedRPA.py ./Validation/Validation_1_PrimedRPA_Parameters.txt'
+ValidationCommand = './PrimedRPA.py ./PrimedRPA_Parameters.txt'
 
 try:
     subprocess.run('chmod +x PrimedRPA.py',shell=True)
     subprocess.run(ValidationCommand,shell=True,check=True)
+    print('\n\nValidation Run Successful')
 
 except subprocess.CalledProcessError as e:
     print(e)
-    print('PrimedRPA Validation Run 1 Fail\nInstallation Exit')
+    print('PrimedRPA Validation Run Fail\nInstallation Exit')
     sys.exit()
 
 
-ValOneDF = pd.read_csv('Validation_1_PrimedRPA_Output.csv')
-ValOneDF = ValOneDF.sort_values(by=['Max_Blastn_Percentage_Match'],ascending=True)
 
+FilesToRemove = ['Installation_Validation_Run_Output_Sets.csv',
+                 'Installation_Validation_Run_Alignment_Summary.csv',
+                 'Installation_Validation_Run_PrimedRPA_Oligo_Binding_Sites.csv']
 
-ExpectedResult = pd.DataFrame([['GATCACAGGTCTATCACCCTATTAACCACTCACGGGAGCTC', 'TCCATGCATTTGGTATTTCGTCTGGCGGCTGTGCACGCGATAGCATTGCGAGACGCTGG', 'TACTTCAAAGACAGATACTGCGACATAGGGTGCTCCGGCTC', 17.073170731707318],
-                                ['ATCACAGGTCTATCACCCTATTAACCACTCACGGGAGCTCT', 'TCCATGCATTTGGTATTTCGTCTGGCGGCTGTGCACGCGATAGCATTGCGAGACGCTGG', 'TACTTCAAAGACAGATACTGCGACATAGGGTGCTCCGGCTC', 19.51219512195122],
-                                ['GATCACAGGTCTATCACCCTATTAACCACTCACGGGAGCTC', 'CTCCATGCATTTGGTATTTCGTCTGGCGGCTGTGCACGCGATAGCATTGCGAGACGCTG', 'ACTTCAAAGACAGATACTGCGACATAGGGTGCTCCGGCTCC', 17.073170731707318],
-                                ['GATCACAGGTCTATCACCCTATTAACCACTCACGGGAGCTC', 'CTCCATGCATTTGGTATTTCGTCTGGCGGCTGTGCACGCGATAGCATTGCGAGACGCTG', 'TACTTCAAAGACAGATACTGCGACATAGGGTGCTCCGGCTC', 17.073170731707318]],
-                                columns=["Forward_Primer", "Nfo_Probe", "Reverse_Primer", "Max_Blastn_Percentage_Match"])
-
-
-
-
-
-counter = 0
-for i in ValOneDF.values.tolist():
-    if i in ExpectedResult.values.tolist():
-        counter+=1
-
-if counter == len(ExpectedResult):
-    print('Validation 1 Passed\n')
-
-else:
-    print('Validation 1 Failed\nInstallation Exit')
-    sys.exit()
-
-FilesToRemove = ['Validation_1_PrimedRPA_Output.csv']
 for i in FilesToRemove:
     if os.path.exists(i):
         os.remove(i)
 
-shutil.rmtree('./Validation_1_Background_Blastn_DB_PrimedRPA')
+shutil.rmtree('./VALIDATION_1_BACKGROUND_Blastn_DB_PrimedRPA')
 
 print('Installation Successfully Complete')

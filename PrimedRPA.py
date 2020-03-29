@@ -26,6 +26,8 @@ import random
 import numpy
 import pandas as pd
 from collections import Counter
+from multiprocessing import Pool
+import argparse
 
 # Wrapper for clustal omega
 def RunningClustalo1(ClustalOPath,
@@ -67,137 +69,61 @@ def getComplement(seq,
 		return(seqComp)
 
 
-def CheckingAlignedOutputFile(Targetsequencefile,
-							  UserConservedDecimal,
-							  DesiredPrimerLength,
-							  ProbeRequired,
-							  DesiredProbeLength,
-							  AmpliconSize,
-							  BindingSitesSeed):
+
+## Background Binding Check = TO IMPROVE
+def BlastnBackgroundCheck(seq,AllParameter):
 
 
-	fastadict = {}
-	with open(Targetsequencefile) as file_one:
-		for line in file_one:
-			line = line.strip()
-			if not line:
-				continue
-			if line.startswith(">"):
-				active_sequence_name = line[1:]
-				if active_sequence_name not in fastadict:
-					fastadict[active_sequence_name] = ''
-				continue
-			sequence = line
-			fastadict[active_sequence_name] += sequence.upper()
+	MaxBackgroundScoreBindingScore = 0
+	MaxScoreBackSeq = ''
 
 
-	FirstSeq = True
-	FastaSeqLength = 0
-	for fastaseq in fastadict.values():
-		if FirstSeq == True:
-			FastaSeqLength = len(fastaseq)
-			FirstSeq = False
-		if len(fastaseq) != FastaSeqLength:
-			sys.exit('ERROR: Alignment file error length of all sequences is not equal')
+	#Create temp fasta file
+	tempfastainput = open('./{}/{}_Blastn_Input.fa'.format(AllParameter.PrimerBlastnOutput,seq),'w')
+	tempfastainput.write('>Temp_Blastn_Fasta\n{}\n'.format(seq))
+	tempfastainput.close()
+
+	#Triggure Blastn command
+	blastncommandrun = '{0} -task "blastn-short"  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps" '.format(AllParameter.BlastnPath,
+																																											 				   seq,
+																																											 			  	   AllParameter.BlastnDBName,
+																																											 			  	   AllParameter.PrimerBlastnOutput)
+	subprocess.call([blastncommandrun],shell=True)
+
+	# Try to read dataframe (may be empty if no alignments found)
+	try:
+
+		blastnoutdf = pd.read_csv('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput,seq),header=None)
+		blastnoutdf.columns=['Background_SeqID','Percentage Identity','qStart','qEnd','BackSeq_Start','BackSeq_End','Evalue','Number Of Gaps']
+
+		blastnoutdf['Cross Reactivity Score'] = ((((blastnoutdf['qEnd']+1) - blastnoutdf['qStart'])*(blastnoutdf['Percentage Identity']/100))/len(seq))*100
+
+		blastnoutdf = blastnoutdf.sort_values(by=['Cross Reactivity Score'],ascending=False)
 
 
-	AlignedDF = pd.DataFrame()
+		blastnoutdf.to_csv('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput,seq),index=None)
 
-	for seqindex in list(range(FastaSeqLength)):
+		IndexOfInterest = blastnoutdf.index.tolist()[0]
 
-		TempNucleotides = []
+		MaximumPercentageMatch = blastnoutdf.loc[IndexOfInterest,'Cross Reactivity Score']
+		MaxHomologyBackgroundSeq = blastnoutdf.iloc[IndexOfInterest,0]
 
-		for faseq in fastadict.values():
-			TempNucleotides.append(faseq[seqindex])
+	# If dataframe empty e.g. no alignments at all
+	except pd.errors.EmptyDataError:
+		MaximumPercentageMatch = 0
 
+	if MaximumPercentageMatch > MaxBackgroundScoreBindingScore:
+		MaxBackgroundScoreBindingScore = MaximumPercentageMatch
+		MaxScoreBackSeq = MaxHomologyBackgroundSeq
 
-		if (len(TempNucleotides) == 2 and
-			'-' in TempNucleotides):
-			MostCommonN = '-'
-			NRepresentation = -100 #Harsh weighting against splits
-
-		else:
-			BugFix = Counter(TempNucleotides)
-			MostCommonN = max(TempNucleotides, key=BugFix.get)
-
-			if MostCommonN == '-':
-				NRepresentation = -100 #Harsh weighting against splits
-			else:
-				NRepresentation = TempNucleotides.count(MostCommonN)/len(TempNucleotides)
+	return (MaxBackgroundScoreBindingScore, MaxScoreBackSeq)
 
 
-		AlignedDF = AlignedDF.append({'Index_Pos':seqindex,'Nucleotide':MostCommonN,'Abundance':NRepresentation},ignore_index=True)
+# Creates Exo Fluorescent Probe
+def RunFluroProbeAnalysis(ProbeBindingSeq):
 
-	TargetSiteLengths = [DesiredPrimerLength]
-	if ProbeRequired in ['Exo','Nfo']:
-		TargetSiteLengths.append(DesiredProbeLength)
-
-	PrimerStartSites = []
-	ProbeStartSites = []
-
-	RoundOneIter = True
-	for tsl in TargetSiteLengths:
-		for i in list(range(FastaSeqLength-tsl)):
-			MeanHomologyScore = AlignedDF.loc[i:i+tsl,'Abundance'].mean()
-			if MeanHomologyScore >= UserConservedDecimal:
-				if RoundOneIter == True:
-					PrimerStartSites.append(i)
-				else:
-					ProbeStartSites.append(i)
-		RoundOneIter = False
-
-	PrimerProbeBindingSiteSets = []
-
-	AllUnfilteredCombos = []
-
-	for pss in PrimerStartSites:
-
-		if len(ProbeStartSites) != 0:
-			PrSSSubsets= [prss for prss in ProbeStartSites if prss >= pss+DesiredPrimerLength if prss<= pss+(AmpliconSize-DesiredProbeLength)]
-			for TempPrSSS in PrSSSubsets:
-				RPSSubsets = [rpss for rpss in PrimerStartSites if rpss >= TempPrSSS+DesiredProbeLength if rpss <= pss+(AmpliconSize-DesiredPrimerLength)]
-				AllUnfilteredCombos += list(itertools.product([pss],[TempPrSSS],RPSSubsets))
-
-		else:
-			RPSSubsets = [rpss for rpss in PrimerStartSites if rpss >= pss+DesiredPrimerLength if rpss <= pss+(AmpliconSize-DesiredPrimerLength)]
-			AllUnfilteredCombos += list(itertools.product([pss],RPSSubsets))
-
-	print('{}: Binding Site Combinations Identified'.format(str(len(AllUnfilteredCombos))))
-
-	#Subset AllUnfilteredCombos if necessary to maintain computational efficiency
-	if BindingSitesSeed <= len(AllUnfilteredCombos):
-		AllUnfilteredCombos = random.sample(AllUnfilteredCombos,BindingSitesSeed)
-		print('{}: Binding Site Combinations Remaining after Subsetting'.format(str(len(AllUnfilteredCombos))))
-
-	for ufcombo in AllUnfilteredCombos:
-
-
-		# No Probe necessary
-		if len(ufcombo) == 2:
-			FPBindingSite = ''.join(AlignedDF.loc[ufcombo[0]:ufcombo[0]+DesiredPrimerLength,'Nucleotide'].tolist())
-			RPBindingSite = ''.join(AlignedDF.loc[ufcombo[1]:ufcombo[1]+DesiredPrimerLength,'Nucleotide'].tolist())
-			PPPriorSet = [FPBindingSite,RPBindingSite]
-
-		# With probe
-		else:
-			FPBindingSite = ''.join(AlignedDF.loc[ufcombo[0]:ufcombo[0]+DesiredPrimerLength,'Nucleotide'].tolist())
-			RPBindingSite = ''.join(AlignedDF.loc[ufcombo[2]:ufcombo[2]+DesiredPrimerLength,'Nucleotide'].tolist())
-			ProbeBindingSite = ''.join(AlignedDF.loc[ufcombo[1]:ufcombo[1]+DesiredProbeLength,'Nucleotide'].tolist())
-			PPPriorSet = [FPBindingSite,ProbeBindingSite,RPBindingSite]
-
-
-		if '-' not in ''.join(PPPriorSet):
-
-			PrimerProbeBindingSiteSets.append(PPPriorSet)
-
-	if len(PrimerProbeBindingSiteSets) != 0:
-		print('Associated Binding Site Sequences Successfully Extracted')
-	return PrimerProbeBindingSiteSets
-
-
-def RunFluroProbeAnalysis(ProbeBindingSeq,
-						  minIndexPosition,
-						  maxIndexPosition):
+	minIndexPosition = int(len(ProbeBindingSeq)*0.45)
+	maxIndexPosition = int(len(ProbeBindingSeq)*0.75)
 
 	ProbeValidPass = False
 	basenumber = 0
@@ -214,130 +140,540 @@ def RunFluroProbeAnalysis(ProbeBindingSeq,
 						break
 	return ProbeValidPass
 
-def CompareSequenceForMatches(firstseq,
-							  secondseq):
 
-	MaximumScore = 0
-	MaximumLength = 0
-	MinimumLength = 0
+# Secondary Structure Filter
+def SSIdentification(SeqOne, SeqTwo, threshold=4):
 
-	if len(secondseq) > len(firstseq):
-		MaximumLength = len(secondseq)
-		MinimumLength = len(firstseq)
+	# Nucleotide Dict
+	NucDict = {'A':'T',
+			   'T':'A',
+			   'C':'G',
+			   'G':'C'
+				}
 
-	else:
-		MaximumLength = len(firstseq)
-		MinimumLength = len(secondseq)
+	# Maximum Binding sites
+	MaxBindingSites = 0
+	MaxBindingString = ''
+	MaxBindingPercentage = 0
 
-	# Adjusted sequences
-	fistseqadj = firstseq + '?' * int(MaximumLength-len(firstseq))
-	secondseqadj = secondseq + '?' * int(MaximumLength-len(secondseq))
+	# Max length of string according to shift.
+	MaxLength = len(SeqOne) + len(SeqTwo) - 1
 
-	ForwardShiftfistseqadj = fistseqadj
-	ReverseShiftfistseqadj = fistseqadj
+	# Add white space to end of sequences
+	SeqOneNorm = SeqOne + ' '*(MaxLength-len(SeqOne))
+	SeqTwoNorm = SeqTwo + ' '*(MaxLength-len(SeqTwo))
+	SeqTwoReversed = SeqTwo[::-1] + ' '*(MaxLength-len(SeqTwo))
 
-	FirstCompTest = True
+	# Loop through var pairs whereby the first element will be shifted
+	for VarPair in [(SeqTwoNorm,SeqOneNorm),
+					(SeqOneNorm,SeqTwoNorm),
+					(SeqOneNorm,SeqTwoReversed),
+					(SeqTwoReversed,SeqOneNorm)]:
 
-	TestCounter = 0
+		# Loop through possible shift positions
+		for i in list(range(VarPair[0].count(' ')+1)):
 
-	# Length of fistseqadj and secondseqadj should be equal
-	for i in list(range(MaximumLength)):
+			if i == 0:
+				DynamicSeq = VarPair[0]
+			else:
+				DynamicSeq = ' '*i + VarPair[0][:-i]
 
-		FSMScore = 0
-		RSMScore = 0
+			DyanimicSeqList = list(DynamicSeq)
+			FixedSeqList = list(VarPair[1])
 
-		# Ensure we do a first test with no changes
-		if TestCounter != 0:
+			# This shall house the syntax to represent binding
+			PossibleBindingString = ''
 
-			# Forward Shift FS
-			ForwardShiftfistseqadj = '?' + ForwardShiftfistseqadj[:-1]
-			# Reverse Shift FS
-			ReverseShiftfistseqadj = ReverseShiftfistseqadj[1:] + '?'
+			for StringPos in list(range(len(DyanimicSeqList))):
+				if DyanimicSeqList[StringPos] in list(NucDict.keys()):
+					if NucDict[DyanimicSeqList[StringPos]] == FixedSeqList[StringPos]:
+						PossibleBindingString += '|'
+					else:
+						PossibleBindingString += '-'
+				else:
+					PossibleBindingString += '-'
 
-
-		TestCounter +=1
-
-		for it in list(range(MaximumLength)):
-
-			if (ForwardShiftfistseqadj[it] == secondseqadj[it] and
-				ForwardShiftfistseqadj[it] != '?' and
-				secondseqadj[it] != '?'):
-
-				FSMScore +=1
-
-			if (ReverseShiftfistseqadj[it] == secondseqadj[it] and
-				ReverseShiftfistseqadj[it] != '?' and
-				secondseqadj[it] != '?'):
-
-				RSMScore +=1
+			NumberOfBindingMatches = PossibleBindingString.count('|')
+			CompleteBindingString = DynamicSeq + '\n' + PossibleBindingString + '\n' + VarPair[1]
 
 
-		if FSMScore > RSMScore:
-			if FSMScore > MaximumScore:
-				MaximumScore = FSMScore
+			if MaxBindingSites < NumberOfBindingMatches:
+				MaxBindingSites = NumberOfBindingMatches
+				MaxBindingString = CompleteBindingString
+				MaxBindingPercentage = (MaxBindingSites/min([len(SeqOne),len(SeqTwo)]))*100
+
+
+	#SSPossibilitiesDF = SSPossibilitiesDF.sort_values(by=['Complementary_Bases'], ascending=False)
+	return (MaxBindingPercentage,MaxBindingString)
+
+
+# Creating Alignment DF Multithread Function
+def CreatingInputHomologyDF(fastadict,FastaIndexList):
+	AlignedDF = pd.DataFrame()
+
+	for seqindex in FastaIndexList:
+		TempNucleotides = []
+		for faseq in fastadict.values():
+			TempNucleotides.append(faseq[seqindex])
+
+		# Remove NoN-specific Nucleotides = IUPAC designated the symbols for nucleotides
+		TempNucleotides = [TN for TN in TempNucleotides if TN not in ['W','S','M',
+																	  'K','R','Y',
+																      'N']]
+		if (len(TempNucleotides) == 2 and
+			'-' in TempNucleotides):
+			MostCommonN = '-'
+			NRepresentation = -100 #Harsh weighting against splits
+		else:
+			BugFix = Counter(TempNucleotides)
+			MostCommonN = max(TempNucleotides, key=BugFix.get)
+			if MostCommonN == '-':
+				NRepresentation = -100 #Harsh weighting against splits
+			else:
+				NRepresentation = TempNucleotides.count(MostCommonN)/len(TempNucleotides)
+		AlignedDF = AlignedDF.append({'Index_Pos':seqindex,'Nucleotide':MostCommonN,'Abundance':NRepresentation},ignore_index=True)
+
+
+	return AlignedDF
+
+
+def IndentifyingAndFilteringOligos(AllParameter,
+								   AlignedDF,
+								   PossibleStartIndexes):
+
+
+	OligoDF = pd.DataFrame()
+	TargetSiteLengths = [AllParameter.PrimerLength]
+	if AllParameter.ProbeRequired in ['EXO','NFO']:
+		TargetSiteLengths.append(AllParameter.ProbeLength)
+
+	# Loop through primer or probe
+	for TSLP in TargetSiteLengths:
+		if TSLP == AllParameter.PrimerLength:
+			OligoType = 'Primer'
+		else:
+			OligoType = 'Probe'
+
+		# Add in ability to handle specified range or primer or probe values.
+		if '-' in TSLP:
+			TSLRangePrior = [int(TSLI) for TSLI in TSLP.split('-')]
+			TSLList = list(range(TSLRangePrior[0],TSLRangePrior[1]+1))
 
 		else:
-			if RSMScore > MaximumScore:
-				MaximumScore = RSMScore
+			TSLList = [int(TSLP)]
+
+		# Loop through possible oligo lengths.
+		for TSL in TSLList:
+
+			# Loop through possible start sites
+			for i in PossibleStartIndexes:
+
+				# Make Sure dont go too far out of dataframe
+				if i+TSL<len(AlignedDF)-TSL:
+
+					DFSubSet = AlignedDF[(AlignedDF['Index_Pos']>=i)&(AlignedDF['Index_Pos']<=(i+TSL-1))]
+					MeanHomologyScore = DFSubSet['Abundance'].mean()
 
 
-	PercentageMatch = MaximumScore / MinimumLength
+					if MeanHomologyScore > AllParameter.IdentityThreshold:
+						NucleotideSeq = ''.join(DFSubSet['Nucleotide'].tolist())
+						NucleotideSeq = NucleotideSeq.upper()
 
-	return PercentageMatch
+						#Check Length of Oligo
+						if len(NucleotideSeq) == TSL:
 
+							# Assess GC Content
+							GCPercentage = ((NucleotideSeq.count('G') + NucleotideSeq.count('C'))/len(NucleotideSeq))*100
+							if (GCPercentage < AllParameter.MaxGC and GCPercentage > AllParameter.MinGC):
 
-def BlastnBackgroundCheck(PrimerProbeSetList,
-						  BlastnPath,
-						  BlastnDBName,
-						  RunReferenceName):
+								# Assess Repeat Nucleotide
+								NoRepeat = True
+								for RROI in ['N','A','G','C','T']:
+									RROIString = RROI * AllParameter.NucleotideRepeatLimit
+									if RROIString in NucleotideSeq:
+										NoRepeat = False
 
+								if NoRepeat == True:
 
-	MaxBackgroundScoreBindingScore = 0
-
-	for seq in PrimerProbeSetList:
-
-		#Create temp fasta file
-		tempfastainput = open('./{}_Blastn_Input.fa'.format(RunReferenceName),'w')
-		tempfastainput.write('>Temp_Blastn_Fasta\n{}\n'.format(seq))
-		tempfastainput.close()
-
-		#Triggure Blastn command
-		blastncommandrun = '{0} -task "blastn-short"  -query  {1}_Blastn_Input.fa -db {2}/{2} -out {1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend" '.format(BlastnPath,RunReferenceName,BlastnDBName)
-		subprocess.call([blastncommandrun],shell=True)
-
-		# Try to read dataframe (may be empty if no alignments found)
-		try:
-
-			blastnoutdf = pd.read_csv('{}_Blastn_Output.csv'.format(RunReferenceName),header=None)
-
-			blastnoutdf['Temp_Score'] = (blastnoutdf[3] - blastnoutdf[2])*(blastnoutdf[1]/100)
-
-			QuerySpecificPercentageId = []
-
-			for TPSI in blastnoutdf['Temp_Score'].tolist():
-
-				AdjustedPIScore = TPSI/len(seq)
-
-				QuerySpecificPercentageId.append(AdjustedPIScore)
+									# Run Secondary Structure Check / Self Dimerisation
+									SDSSFilterPass=True
+									MaxBindingSites, MaxBindingString = SSIdentification(NucleotideSeq,NucleotideSeq)
+									if MaxBindingSites > AllParameter.DimerisationThresh:
+										SDSSFilterPass=False
 
 
-			MaximumPercentageMatch = max(QuerySpecificPercentageId) * 100
+									if SDSSFilterPass == True:
+										# Define row dictionary if passed all above stages
+										RowDict = {'Oligo_Sequence':NucleotideSeq,
+												   'Oligo_Type':OligoType,
+												   'Binding_Site_Start_Index':i,
+												   'Oligo_Length':TSL,
+												   'Conservation_Score':MeanHomologyScore,
+												   'GC_Content': GCPercentage,
+												   'Self Dimerisation / Secondary Structure Percentage':MaxBindingSites,
+												   'Self Dimerisation / Secondary Structure String':MaxBindingString}
 
 
-		# If dataframe empty e.g. no alignments at all
-		except pd.errors.EmptyDataError:
-			MaximumPercentageMatch = 0
+										# Assess if Specific Probe Check is Needed.
+										ProbePass = True
+										if OligoType == 'Probe':
 
-		if MaximumPercentageMatch >= MaxBackgroundScoreBindingScore:
-			MaxBackgroundScoreBindingScore = MaximumPercentageMatch
-
-		# Delete temporary files
-		os.remove('{}_Blastn_Input.fa'.format(RunReferenceName))
-		os.remove('{}_Blastn_Output.csv'.format(RunReferenceName))
+											# Run Specific Exo Probe Checks
+											if AllParameter.ProbeRequired == 'EXO':
+												ProbePass = RunFluroProbeAnalysis(NucleotideSeq)
 
 
 
-	return MaxBackgroundScoreBindingScore
+										if ProbePass == True:
+
+											# Add Run Blastn Check
+											BlastnPass = True
+											#If Background Check Neccessary Look To Change Blastn pass
+											if AllParameter.BackgroundCheck.upper() != 'NO':
+
+												# Run Blastn Check And If Passess Write Out Set
+												MaxBackgroundScoreBindingScore, MaxScoreBackSeq  = BlastnBackgroundCheck(NucleotideSeq, AllParameter)
+
+
+												# Check to see if Max Binding Score Less Than Threshold
+												if MaxBackgroundScoreBindingScore > AllParameter.CrossReactivityThresh:
+													BlastnPass = False
+													# Remove Background If Neccessary
+													os.remove('{}/{}_Blastn_Input.fa'.format(AllParameter.PrimerBlastnOutput, NucleotideSeq))
+													os.remove('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput, NucleotideSeq))
+
+												else:
+													RowDict['Max Background Binding Score'] = MaxBackgroundScoreBindingScore
+													RowDict['Max Background Binding SeqID'] = MaxScoreBackSeq
+
+
+											# If it passed Background Filtering
+											if BlastnPass == True:
+												OligoDF = OligoDF.append(RowDict,ignore_index=True)
+
+	# Return Primer/Probe DataFrame
+	return OligoDF
+
+
+def ComboIdentifyier(PrimerSS,ReversePrimerSS,ProbeSS,AllParameter,PassedOligos,FPrimerL,RPrimerL,ProbeL):
+
+	PassedSetsDataFrame = pd.DataFrame()
+	CombosList = []
+
+	for FP in PrimerSS:
+
+		# If Probe Required
+		if AllParameter.ProbeRequired in ['EXO','NFO']:
+			Probes = [prss for prss in ProbeSS if (prss >= (FP+FPrimerL) and
+												   prss<= (FP+AllParameter.AmpliconSizeLimit-RPrimerL-ProbeL))]
+
+			for Probe in Probes:
+				ReversePrimers = [rpss for rpss in ReversePrimerSS if (rpss >= (Probe+ProbeL) and
+																rpss <= (FP+AllParameter.AmpliconSizeLimit-RPrimerL))]
+
+				CombosList += list(itertools.product([FP],ReversePrimers,[Probe]))
+
+		# Probe Not Required
+		else:
+			ReversePrimers = [rpss for rpss in ReversePrimerSS if (rpss >= (FP+FPrimerL) and
+															rpss <= (FP+AllParameter.AmpliconSizeLimit-RPrimerL))]
+
+			CombosList += list(itertools.product([FP],ReversePrimers))
+
+
+	# Extract Valid Primer-Probe Combos
+	for Combo in CombosList:
+		# Identify Indexes
+		FPIndex = PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['Oligo_Length']==FPrimerL)&(PassedOligos['Binding_Site_Start_Index']==Combo[0])].index.tolist()[0]
+		RPIndex = PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['Oligo_Length']==RPrimerL)&(PassedOligos['Binding_Site_Start_Index']==Combo[1])].index.tolist()[0]
+
+
+		# Extract Combo Primer Sequences - (Reverse Complement RP)
+		ComboSeqList = [PassedOligos.loc[FPIndex,'Oligo_Sequence'],getComplement(PassedOligos.loc[RPIndex,'Oligo_Sequence'],True)]
+
+		# Add Probe Sequence If Necessary
+		if AllParameter.ProbeRequired in ['EXO','NFO']:
+			ProbeIndex = PassedOligos[(PassedOligos['Oligo_Type']=='Probe')&(PassedOligos['Oligo_Length']==ProbeL)&(PassedOligos['Binding_Site_Start_Index']==Combo[2])].index.tolist()[0]
+			ComboSeqList.append(PassedOligos.loc[ProbeIndex,'Oligo_Sequence'])
+
+
+		#Run Dimerisation Check And If Passess Continue
+		DimerisationPass = True
+		MaxComboSSScore = 0
+		MaxComboSSString = ''
+		for SSSCombo in list(itertools.combinations(ComboSeqList,r=2)):
+			SSMaxBindingSites, SSMaxBindingString = SSIdentification(SSSCombo[0],SSSCombo[1])
+
+			if SSMaxBindingSites > MaxComboSSScore:
+				MaxComboSSScore = SSMaxBindingSites
+				MaxComboSSString = SSMaxBindingString
+
+		if MaxComboSSScore > AllParameter.DimerisationThresh:
+			DimerisationPass = False
+
+		if DimerisationPass == True:
+
+			BlastnPass = True ### REMOVE INDEX AT LATER DATE
+
+
+			# Add Everything To DF If Passed All Parameters
+			if BlastnPass == True:
+
+				PassedComboRow = {'Forward Primer (FP)':ComboSeqList[0],
+								  'FP GC%':  PassedOligos.loc[FPIndex,'GC_Content'],
+								  'FP Binding Start Site':  PassedOligos.loc[FPIndex,'Binding_Site_Start_Index'],
+								  'Reverse Primer (RP)': ComboSeqList[1],
+								  'RP GC%': PassedOligos.loc[RPIndex,'GC_Content'],
+								  'RP Binding Start Site': PassedOligos.loc[RPIndex,'Binding_Site_Start_Index'],
+								  'Amplicon Size': PassedOligos.loc[RPIndex,'Binding_Site_Start_Index'] + RPrimerL - PassedOligos.loc[FPIndex,'Binding_Site_Start_Index'],
+								  'Max Secondary Structure / Dimerisation Percentage Score':SSMaxBindingSites,
+								  'Max Secondary Structure / Dimerisation String':MaxComboSSString,
+								  'Forward Primer Length':FPrimerL,
+								  'Reverse Primer Length':RPrimerL
+								  }
+
+				MaxBackgroundScoresIndexes = [FPIndex,RPIndex]
+
+				if AllParameter.ProbeRequired in ['EXO','NFO']:
+					PassedComboRow['Probe (P)'] = ComboSeqList[2]
+					PassedComboRow['Probe GC%'] = PassedOligos.loc[ProbeIndex,'GC_Content']
+					PassedComboRow['Probe Binding Start Site'] = PassedOligos.loc[ProbeIndex,'Binding_Site_Start_Index']
+					PassedComboRow['Probe Length'] = ProbeL
+					MaxBackgroundScoresIndexes.append(ProbeIndex)
+
+
+				if AllParameter.BackgroundCheck != 'NO':
+
+					MaxBackgroundScoreBindingScore = 0
+					MaxScoreBackSeq = ''
+					for SucIndex in MaxBackgroundScoresIndexes:
+						if PassedOligos.loc[SucIndex,'Max Background Binding Score'] > MaxBackgroundScoreBindingScore:
+							MaxBackgroundScoreBindingScore = PassedOligos.loc[SucIndex,'Max Background Binding Score']
+							MaxScoreBackSeq = PassedOligos.loc[SucIndex,'Max Background Binding SeqID']
+
+
+					PassedComboRow['Max Background Binding Score'] = MaxBackgroundScoreBindingScore
+					PassedComboRow['Max Background Binding Seq'] = MaxScoreBackSeq
+
+
+				# Add Passed Row To DataFrame
+				PassedSetsDataFrame = PassedSetsDataFrame.append(PassedComboRow,ignore_index=True)
+
+	return PassedSetsDataFrame
+
+# Main Function To Generate Primer - Probe Combos
+def CheckingAlignedOutputFile(AllParameter):
+
+
+	# Check If Binding Sites Already Exist
+	if AllParameter.PriorBindingSite != 'NO':
+
+		print('Reading In Oligo Binding Sites')
+		PassedOligos = pd.read_csv('{}'.format(AllParameter.PriorBindingSite))
+
+		# Filter on Parameters Passed In
+		PassedOligos = PassedOligos[(PassedOligos['GC_Content']>=AllParameter.MinGC)&
+									(PassedOligos['GC_Content']<=AllParameter.MaxGC)&
+									(PassedOligos['Self Dimerisation / Secondary Structure Percentage']<=AllParameter.DimerisationThresh)&
+									(PassedOligos['Conservation_Score']>=AllParameter.IdentityThreshold)]
+
+
+		# Filter on Primer + Probe Ranges - (Tidy Up At Later Date)
+		PPLengthDict = {}
+		PrimerRange=False
+		ProbeRange = False
+		for LL in [AllParameter.PrimerLength,AllParameter.ProbeLength]:
+			if LL == AllParameter.PrimerLength:
+				LLType = 'Primer'
+			else:
+				LLType = 'Probe'
+
+			if '-' in LL:
+				LLRangePrior = [int(LLLI.strip()) for LLLI in LL.split('-')]
+				PPLengthDict['{}_Max'.format(LLType)] = max(LLRangePrior)
+				PPLengthDict['{}_Min'.format(LLType)] = min(LLRangePrior)
+				if LLType == 'Primer':
+					PrimerRange = True
+				else:
+					ProbeRange = True
+			else:
+				PPLengthDict['{}_Len'.format(LLType)] =  int(LL)
+
+
+		if PrimerRange == True:
+			PrimerPassedSubet = PassedOligos[(PassedOligos['Oligo_Type']=='Primer') &
+											 (PassedOligos['Oligo_Length']>=PPLengthDict['Primer_Min']) &
+											 (PassedOligos['Oligo_Length']<=PPLengthDict['Primer_Max']) ]
+		else:
+			PrimerPassedSubet = PassedOligos[(PassedOligos['Oligo_Type']=='Primer') &
+											 (PassedOligos['Oligo_Length']==PPLengthDict['Primer_Len'])]
+
+
+		if ProbeRange == True:
+			ProbePassedSubet = PassedOligos[(PassedOligos['Oligo_Type']=='Probe') &
+											 (PassedOligos['Oligo_Length']>=PPLengthDict['Probe_Min']) &
+											 (PassedOligos['Oligo_Length']<=PPLengthDict['Probe_Max']) ]
+
+
+		else:
+			ProbePassedSubet = PassedOligos[(PassedOligos['Oligo_Type']=='Probe') &
+											(PassedOligos['Oligo_Length']==PPLengthDict['Probe_Len'])]
+
+
+		PassedOligos = pd.concat([PrimerPassedSubet,ProbePassedSubet]).reset_index().drop(['index'],axis=1)
+
+
+
+		# If Background Check is Present filter
+		if AllParameter.BackgroundCheck == 'YES':
+			PassedOligos = PassedOligos[PassedOligos['Max Background Binding Score']<=AllParameter.CrossReactivityThresh]
+
+
+
+		if (len(PrimerPassedSubet)==0 or len(ProbePassedSubet)==0 or len(PassedOligos) == 0):
+			print('No Oligos Passed Filtering')
+			sys.exit()
+
+
+	#Create Binding DataFrame If It Doesnt Exist
+	else:
+
+		# Load In User Specified
+		if AllParameter.PriorAlign != 'NO':
+			print('Reading Alignment Summary')
+			MergedAlignedDF = pd.read_csv('{}'.format(AllParameter.PriorAlign))
+			HDFLST = list(range(len(MergedAlignedDF)))
+			HomoDFInputIndexBlocks = [HDFLST[i:i + 1000] for i in range(0, len(HDFLST), 1000)]
+
+
+		# Create Alignment DF if it doesnt exist
+		else:
+			print('Generating Alignment Summary')
+			# Read in the aligned fasta sequences
+			fastadict = {}
+			with open(AllParameter.InputFile) as file_one:
+				for line in file_one:
+					line = line.strip()
+					if not line:
+						continue
+					if line.startswith(">"):
+						active_sequence_name = line[1:]
+						if active_sequence_name not in fastadict:
+							fastadict[active_sequence_name] = ''
+						continue
+					sequence = line
+					fastadict[active_sequence_name] += sequence.upper()
+
+			# Extract Alignment Length and QC
+			FirstSeq = True
+			FastaSeqLength = 0
+			for fastaseq in fastadict.values():
+				if FirstSeq == True:
+					FastaSeqLength = len(fastaseq)
+					FirstSeq = False
+				if len(fastaseq) != FastaSeqLength:
+					sys.exit('ERROR: Alignment file error length of all sequences is not equal')
+
+
+			# Generate Neccessary Alignment Summary DF
+			HDFLST = list(range(FastaSeqLength))
+			HomoDFInputIndexBlocks = [HDFLST[i:i + 1000] for i in range(0, len(HDFLST), 1000)]
+			MTDFOVI = list(zip([fastadict]*len(HomoDFInputIndexBlocks),HomoDFInputIndexBlocks))
+			with Pool(processes=AllParameter.Threads) as pool:
+				AlignedDFMultiThreadOupt = pool.starmap(CreatingInputHomologyDF,MTDFOVI)
+			MergedAlignedDF = pd.concat(AlignedDFMultiThreadOupt).reset_index().drop(['index'],axis=1)
+			MergedAlignedDF = MergedAlignedDF.sort_values(by=['Index_Pos'])
+			MergedAlignedDF.to_csv('{}_Alignment_Summary.csv'.format(AllParameter.RunID),index=None)
+
+
+		print('Generating Primer/Probe Binding Site DataFrame')
+		# Generating Primer/Probe Binding Site DataFrame
+		PrimerProbeCheckParallelInput = list(zip([AllParameter]*len(HomoDFInputIndexBlocks),
+												 [MergedAlignedDF]*len(HomoDFInputIndexBlocks),
+												 HomoDFInputIndexBlocks))
+		with Pool(processes=AllParameter.Threads) as pool:
+			PotentialPrimerProbeOut = pool.starmap(IndentifyingAndFilteringOligos,PrimerProbeCheckParallelInput)
+
+
+		PassedOligos =  pd.concat(PotentialPrimerProbeOut).reset_index().drop(['index'],axis=1)
+		if len(PassedOligos) == 0:
+			print('No Oligos Passed Filtering')
+			sys.exit()
+		PassedOligos.to_csv('{}_PrimedRPA_Oligo_Binding_Sites.csv'.format(AllParameter.RunID),index=None)
+
+
+
+
+
+
+
+	# Identify Primer-Probe Sets
+	print('Identifying Valid Primer-Probe Combinations')
+	FinalOutputDF = pd.DataFrame()
+
+	# Determine all probe lengths available
+	if AllParameter.ProbeRequired in ['EXO','NFO']:
+		PossibleProbeLengths = PassedOligos[PassedOligos['Oligo_Type']=='Probe'].loc[:,'Oligo_Length'].unique().tolist()
+
+	else:
+		PossibleProbeLengths = [0]
+
+	# Loop through possible FP  lengths
+	for SFPL in PassedOligos[PassedOligos['Oligo_Type']=='Primer'].loc[:,'Oligo_Length'].unique():
+
+		# Identify all possible FP starting sites
+		PossibleForwardPrimerSS = PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['Oligo_Length']==SFPL)].loc[:,'Binding_Site_Start_Index'].tolist()
+
+		# Loop through all possible RP lengths
+		for SRPL in PassedOligos[PassedOligos['Oligo_Type']=='Primer'].loc[:,'Oligo_Length'].unique():
+
+			# Identify all possible RP starting sites
+			PossibleReversePrimerSS = PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['Oligo_Length']==SRPL)].loc[:,'Binding_Site_Start_Index'].tolist()
+
+
+			# Split FP sites into tranches based on number of threads available.
+			random.shuffle(PossibleForwardPrimerSS)
+			PrimerStartSiteTranchesOne = [PossibleForwardPrimerSS[i:i + 2] for i in range(0, len(PossibleForwardPrimerSS), 2)]
+			PrimerStartSiteTranchesTwo = [PrimerStartSiteTranchesOne[i:i + AllParameter.Threads] for i in range(0, len(PrimerStartSiteTranchesOne), AllParameter.Threads)]
+
+			# Loop through possible probe lengths.
+			for PPL in PossibleProbeLengths:
+
+				if PPL == 0:
+					PossibleProbeSS = []
+
+				else:
+					PossibleProbeSS = PassedOligos[(PassedOligos['Oligo_Type']=='Probe')&(PassedOligos['Oligo_Length']==PPL)].loc[:,'Binding_Site_Start_Index'].tolist()
+
+				for PSST in PrimerStartSiteTranchesTwo:
+					if len(FinalOutputDF) < AllParameter.MaxSets: ## Check this threshold setting.
+						ComboSearchInput = list(zip(PSST,
+												  [PossibleReversePrimerSS]*len(PSST),
+												  [PossibleProbeSS]*len(PSST),
+												  [AllParameter]*len(PSST),
+												  [PassedOligos]*len(PSST),
+												  [SFPL]*len(PSST),
+												  [SRPL]*len(PSST),
+												  [PPL]*len(PSST)))
+
+
+
+						with Pool(processes=AllParameter.Threads) as pool:
+							SuccessfulSets = pool.starmap(ComboIdentifyier,ComboSearchInput)
+
+						TempOutputDF = pd.concat(SuccessfulSets)
+						FinalOutputDF = pd.concat([FinalOutputDF,TempOutputDF])
+						if len(FinalOutputDF) != 0:
+							FinalOutputDF.to_csv('{}_Output_Sets.csv'.format(AllParameter.RunID),index=None)
+
+
+	print('PrimedRPA Complete')
+	print('If helpful, please cite:\n\nHiggins M et al. Submitted. 2018\nDOI: 10.1093/bioinformatics/bty701')
+
+
+########################################################################################################################
+########################################################################################################################
+########################################################################################################################
 
 
 # Basic Command Line User Interface
@@ -348,387 +684,121 @@ print('-----Finding RPA Primer and Probe Sets-----')
 print('-------------Higgins M et al.--------------')
 print('-------------------------------------------\n\n')
 
-# Basic Help Functions
-if '-h' in sys.argv or '--help' in sys.argv or len(sys.argv) == 1:
-	print('Usage: PrimedRPA <Path to Parameters File>\n')
-	print('Example: PrimedRPA ./Validation/Validation_1_PrimedRPA_Parameters.txt\n\n')
-	print('Additional information can be found at https://github.com/MatthewHiggins2017/PrimedRPA')
-	print('If used, please cite:\n\tHiggins M et al. Submitted. 2018')
-	sys.exit()
+# Utilise Either Parameters File Or Command Line Interface
+if 'PrimedRPA_Parameters.txt' in sys.argv[1]:
 
-parametersFile = sys.argv[1]
+	# Import and Extract Parameters
+	parametersFile = sys.argv[1]
+	try:
+		paraFile = open(parametersFile,"r")
+		iu = []
+		for line in paraFile.readlines():
+			if ">" in line:
+				n = line.strip('\n')
+				h = n.strip('>')
+				iu.append(h)
+		u = iu[1:]
 
-if parametersFile in glob.glob(parametersFile):
-#if os.path.isfile(parametersFile):
-	paraFile = open(parametersFile,"r")
-	iu = []
-	for line in paraFile.readlines():
-		if ">" in line:
-			n = line.strip('\n')
-			h = n.strip('>')
-			iu.append(h)
-	u = iu[1:]
-
-	RunReferenceName = str(u[0])
-	InputFileType = str(u[2])
-	Targetsequencefile = str(u[1])
-	UserConservedDecimal = int(u[3])/100
-	DesiredPrimerLength = int(u[4])
-	ProbeRequired = str(u[5])
-	DesiredProbeLength = int(u[6])
-	AmpliconSize = int(u[7])
-	NumberOfContinRepeates = int(u[8])
-	MinimumGCcontentFilter = int(u[9])
-	MaximumGCcontentFilter = int(u[10])
-	PrimerProbeSelfComplementaryBinding = int(u[11])
-	Lengthofregionswhichcantoleratesecondarystructure = int(u[12])
-	BackgroundCheckRequired = str(u[13])
-	BackgroundMatchCutOffPercentage = int(u[14])
-	BackgroundGenomeFile = str(u[15])
-	BindingSitesSeed = int(u[16])
-	PrimedSetsSeed = int(u[17])
+		class AllParameter:
+			RunID = str(u[0])
+			PriorAlign = str(u[1])
+			PriorBindingSite = str(u[2])
+			InputFile = str(u[3])
+			InputFileType = str(u[4])
+			IdentityThreshold = int(u[5])/100
+			PrimerLength = u[6].strip()
+			ProbeRequired = str(u[7]).upper()
+			ProbeLength = u[8].strip()
+			AmpliconSizeLimit = int(u[9])
+			NucleotideRepeatLimit = int(u[10])
+			MinGC = int(u[11])
+			MaxGC = int(u[12])
+			DimerisationThresh = int(u[13])
+			BackgroundCheck = str(u[14]).upper()
+			CrossReactivityThresh = int(u[15])
+			MaxSets = int(u[16])
+			Threads = int(u[17])
 
 
-	# Error checks contents of parameters file
-	if '{}_PrimedRPA_Primer_Binding_Sites.csv'.format(RunReferenceName) in glob.glob('{}_PrimedRPA_Primer_Binding_Sites.csv'.format(RunReferenceName)):
-
-		print('Previously Created Primer Binding Sites Identified')
-
-	elif Targetsequencefile not in glob.glob(Targetsequencefile):
-	#elif os.path.isfile(Targetsequencefile) == False:
-
-		print("Error: Input fasta not found. Please ensure that the following path is correct: '{}'.\nPrimedRPA Terminating".format(Targetsequencefile))
+	except:
+		print('Parameters File Could Not Be Opened\nCheck File Path.')
 		sys.exit()
 
-
-	else:
-
-		fileInfo = os.stat(Targetsequencefile)
-		if fileInfo.st_size > 10000000:
-			InputSizeCheck = input("We advise the input file to be less than 10MB due to delays in primer generation.\nDo you want to continue [y/n]:")
-			if InputSizeCheck.lower() in ['n','no']:
-				print('PrimedRPA Terminating')
-				sys.exit()
-
-	if AmpliconSize <= (DesiredPrimerLength*2 + DesiredProbeLength):
-		print("Error: Defined amplicon size is less than combined primer and probe lengths.\nPrimedRPA Terminating")
-		sys.exit()
-
-	if BackgroundGenomeFile not in glob.glob(BackgroundGenomeFile) and BackgroundCheckRequired.lower() == 'yes':
-		print("Error: Background fasta not found.Please ensure that the following path is correct: '{}'.\nPrimedRPA Terminating".format(BackgroundGenomeFile))
-		sys.exit()
-
-
-	# UPDATE: As part of Stage Two to make sure everything is reflected correctly
-	print(('\n'+
-		'Received Parameters:\n\n'+
-		'Run Name:{RunReferenceName}\n' +
-		'Input File Type: {InputFileType}\n' +
-		'Input Fasta: {Targetsequencefile}\n'+
-		'Homology of Conserved Target DNA: {UserConservedDecimal}%\n'+
-		'Desired Primer Length: {DesiredPrimerLength:,}\n'+
-		'Desired Probe Length: {DesiredProbeLength:,}\n'+
-		'Desired Amplicon Length: {AmpliconSize:,}\n'+
-		'Minimum GC Content: {MinimumGCcontentFilter}%\n'+
-		'Maximum GC Content: {MaximumGCcontentFilter}%\n'+
-		'Self-binding cut-off threshold (%): {PrimerProbeSelfComplementaryBinding:,}\n'+
-		'Seconday Structure cut-off threshold (%): {Lengthofregionswhichcantoleratesecondarystructure:,}\n'+
-		'Performing Background Binding Check: {BackgroundCheckRequired}\n'+
-		'Background Binding cut-off threshold (%) {BackgroundMatchCutOffPercentage}\n' +
-		'Background Check File: {BackgroundGenomeFile}\n').format(**globals()))
 else:
-	print("Error: Parameters file not found. Please ensure that the following path is correct '{}'\nPrimedRPA Terminating.".format(parametersFile))
-	sys.exit()
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--RunID', help='Desired Run ID', required=True)
+	parser.add_argument('--PriorAlign', help='Optional: Path to Prior Binding File',default='NO')
+	parser.add_argument('--PriorBindingSite', help='Optional: Path to Prior Binding File',default='NO')
+	parser.add_argument('--InputFile', help='Path to Input File',default='NO')
+	parser.add_argument('--InputFileType', help='Options [SS,MS,MAS]')
+	parser.add_argument('--IdentityThreshold', help='Desired Identity Threshold',default=0.99)
+	parser.add_argument('--PrimerLength', help='Desired Primer Length',type=str,default='30')
+	parser.add_argument('--ProbeRequired', help='Options [NO,EXO,NFO]',type=str,default='NO')
+	parser.add_argument('--ProbeLength', help='Desired Probe Length',default='50')
+	parser.add_argument('--AmpliconSizeLimit', help='Amplicon Size Limit',default=500)
+	parser.add_argument('--NucleotideRepeatLimit', help='Nucleotide Repeat Limit (i.e 5 = AAAAA)',default=5)
+	parser.add_argument('--MinGC', help='Minimum GC Content',default=30)
+	parser.add_argument('--MaxGC', help='Maximum GC Content',default=70)
+	parser.add_argument('--DimerisationThresh', help='Percentage Dimerisation Tolerated',default=40)
+	parser.add_argument('--BackgroundCheck', help='Options [NO, Path To Background Fasta File]',default='NO')
+	parser.add_argument('--CrossReactivityThresh', help='Max Cross Reactivity Threshold',default=60)
+	parser.add_argument('--MaxSets', help='Default Set To 100',default=100)
+	parser.add_argument('--Threads', help='Default Set To 1',default=1)
+	AllParameter = parser.parse_args()
+
+
+
+# Check Files Defined Exist
+FileLocationsCheckList = [AllParameter.PriorAlign,
+						  AllParameter.PriorBindingSite,
+						  AllParameter.BackgroundCheck,
+						  AllParameter.InputFile]
+
+for FL in FileLocationsCheckList:
+	if FL != 'NO':
+		if FL not in glob.glob(FL):
+			print('File Not Found: {}'.format(FL))
+			sys.exit()
+
 
 
 #Define tool dependancy paths
 InstalledSourceScriptPath = os.path.realpath(__file__)
-BlastnPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/blastn')
-BlastnDBCreationPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/makeblastdb')
-ClustalOPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/clustalo')
+AllParameter.BlastnPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/blastn')
+AllParameter.BlastnDBCreationPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/makeblastdb')
+AllParameter.ClustalOPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/clustalo')
 
 
+# Create Blastn Database if neccessary
+if AllParameter.BackgroundCheck.upper() != 'NO':
 
-# Check if File Housing Primer Binding Sites Already Exists For Reference Run
-if '{}_PrimedRPA_Primer_Binding_Sites.csv'.format(RunReferenceName) not in glob.glob('{}_PrimedRPA_Primer_Binding_Sites.csv'.format(RunReferenceName)):
-#if os.path.isfile('{}_PrimedRPA_Primer_Binding_Sites.csv'.format(RunReferenceName)) == False:
-
-	# If necessary perform alignment on the input fasta file
-	if InputFileType == 'MS':
-
-		# Check if MS alignment already Exists in Working Directory
-
-		if Targetsequencefile.replace('.fasta','_Aligned.fasta') not in glob.glob(Targetsequencefile.replace('.fasta','_Aligned.fasta')):
-		#if os.path.isfile(Targetsequencefile.split('/')[-1].replace('.fasta','_Aligned.fasta')) == False:
-			RunningClustalo1(ClustalOPath,[Targetsequencefile], overwriteOutput=False)
-
-		Targetsequencefile = Targetsequencefile.replace('.fasta','_Aligned.fasta')
-
-
-	PrimerProbeBindingSiteSets = CheckingAlignedOutputFile(Targetsequencefile,
-														  UserConservedDecimal,
-														  DesiredPrimerLength,
-														  ProbeRequired,
-														  DesiredProbeLength,
-														  AmpliconSize,
-														  BindingSitesSeed)
-
-	if len(PrimerProbeBindingSiteSets) != 0:
-		# Create CSV to store temp primers so the first stage does not have to be rerun.
-		tempprimerdf = pd.DataFrame(PrimerProbeBindingSiteSets)
-
-		# Provide user with option to save primers as csv
-		CSVSaveInput = 'No'
-		UserDefinedAnswer = False
-
-		timeout = time.time() + 60
-		tempprimerdfsize = str(sys.getsizeof(tempprimerdf)/1000000000)
-		while UserDefinedAnswer == False:
-
-			if time.time() > timeout:
-				break
-			else:
-				CSVSaveInput = input('Save possible primer binding sites. Estimated storage space useage {} GB. [Yes/No]'.format(tempprimerdfsize))
-				UserDefinedAnswer = True
-
-
-		if CSVSaveInput.lower() in ['y','yes']:
-			tempprimerdf.to_csv('{}_PrimedRPA_Primer_Binding_Sites.csv'.format(RunReferenceName),
-																		   index=None,
-																		   header=None)
-
-# If CSV housing primer binding sites exist, extract sets accordingly.
-else:
-	tempdf = pd.read_csv('{}_PrimedRPA_Primer_Binding_Sites.csv'.format(RunReferenceName),
-						header=None)
-	PrimerProbeBindingSiteSets = tempdf.values.tolist()
-
-
-# Check if background binding check is needed and if so generate the Blastn Database
-if BackgroundCheckRequired.lower() in ["y","yes"]:
-
-	BlastnDBName =  '{}_Blastn_DB_PrimedRPA'.format(BackgroundGenomeFile.split('/')[-1].split('.')[0])
-
-	if os.path.exists(BlastnDBName) == False:
-
-		os.makedirs(BlastnDBName)
-
-		makeblastdbcommand = '{0} -in {1} -dbtype nucl -parse_seqids -out {2}/{2}'.format(BlastnDBCreationPath,
-																					 BackgroundGenomeFile,
-																					 BlastnDBName)
+	AllParameter.BlastnDBName =  '{}_Blastn_DB_PrimedRPA'.format(AllParameter.BackgroundCheck.split('/')[-1].split('.')[0])
+	if os.path.exists(AllParameter.BlastnDBName) == False:
+		os.makedirs(AllParameter.BlastnDBName)
+		makeblastdbcommand = '{0} -in {1} -dbtype nucl -parse_seqids -out {2}/{2}'.format(AllParameter.BlastnDBCreationPath,
+																						  AllParameter.BackgroundCheck,
+																						  AllParameter.BlastnDBName)
 
 		print('\nCreating Blastn Database:')
 		subprocess.call([makeblastdbcommand],shell=True)
 		print('\n')
 
+	# Create directory to house blastn outputs
+	AllParameter.PrimerBlastnOutput = '{}/{}'.format(AllParameter.BlastnDBName,AllParameter.RunID)
+	if os.path.exists(AllParameter.PrimerBlastnOutput) == False:
+		os.mkdir(AllParameter.PrimerBlastnOutput)
 
-# Prepare for filtering
-FilterSSets = []
 
-RepeatRegionList = []
-for RROI in ['N','A','G','C','T']:
-	RROIString = RROI * NumberOfContinRepeates
-	RepeatRegionList.append(RROIString)
+# Check If Alignment Is Necessary
+if AllParameter.InputFileType == 'MS':
 
-GCFilteringPrimerPass = 0
-RRFilteringPP = 0
-ProbeFilteringPP = 0
-SSandSBFilterPP = 0
-BackgroundFilterPP = 0
-SetCounter = 0
-FilteredSetPassed  = 0
-ContinueSearch = 'Yes'
+	# Check if MS Alignment already Exists in Working Directory
+	if AllParameter.InputFile.replace('.fasta','_Aligned.fasta') not in glob.glob(AllParameter.InputFile.replace('.fasta','_Aligned.fasta')):
+		RunningClustalo1(AllParameter.ClustalOPath,[AllParameter.InputFile], overwriteOutput=False)
 
-MaxBackgroundBS = []
+	AllParameter.InputFile = AllParameter.InputFile.replace('.fasta','_Aligned.fasta')
 
-# Begin subsetting the PrimerProbe set based on 1000 seed defined seed
-random.shuffle(PrimerProbeBindingSiteSets)
 
-ListSplitsNeeded = math.ceil(len(PrimerProbeBindingSiteSets)/PrimedSetsSeed)
-
-for PPBSSTranche in [PrimerProbeBindingSiteSets[ili::ListSplitsNeeded] for ili in range(ListSplitsNeeded)]:
-
-	if ContinueSearch.lower() in ['no','n']:
-		break
-
-	# Begin for filtering
-	for PPSet in list(PPBSSTranche):
-
-		SetCounter += 1
-
-		CombinedSeq = ''.join(PPSet)
-
-		SN = 0
-		for base in CombinedSeq:
-			if base == "G" or base == "C":
-				SN = SN + 1
-
-		# New GC Filter + N Limit (Filter Step)
-		if (SN/len(CombinedSeq) >= MinimumGCcontentFilter/100 and
-			SN/len(CombinedSeq) <= MaximumGCcontentFilter/100 and
-			CombinedSeq.count('N') < 4):
-
-			# Repeat region filter
-			RepeatRegionPresent = False
-			for bsseq in PPSet:
-				if any(rss in bsseq for rss in RepeatRegionList) == True:
-					RepeatRegionPresent = True
-					break
-
-			GCFilteringPrimerPass +=1
-
-			# Check if successfully passed repeat region filtering (Filter Step)
-			if RepeatRegionPresent == False:
-				RRFilteringPP +=1
-
-				# Check if probe required
-				if ProbeRequired in ['Exo','Nfo']:
-
-					ProbeSuccess = False
-
-					# Add in commands here to generate nfo or exo probe as required.
-					ProbeBindingSeq = PPSet[1]
-
-					if ProbeRequired == 'Exo':
-						minIndexPosition = int(DesiredProbeLength*0.45)
-						maxIndexPosition = int((DesiredProbeLength*0.75))
-
-
-						ProbeSuccessfulOutput = RunFluroProbeAnalysis(ProbeBindingSeq,
-																	  minIndexPosition,
-																	  maxIndexPosition)
-
-						# If unsuccessful try reverse complement of the probe
-						if ProbeSuccessfulOutput == False:
-							RCProbeSuccessfulOutput = RunFluroProbeAnalysis(getComplement(ProbeBindingSeq,reverse=True),
-																			minIndexPosition,
-																			maxIndexPosition)
-
-							# If probe successful when reverse complementing
-							if RCProbeSuccessfulOutput == True:
-
-								# Update the PPSet variable with reverse complement of probe sequence
-								PPSet[1] = getComplement(ProbeBindingSeq)
-
-								ProbeSuccess = True
-
-						# If successful as forward sense (first attempt)
-						else:
-							ProbeSuccess = True
-
-					if ProbeRequired =='Nfo':
-
-						# Add in necessary check steps / Antibody attachment
-
-						ProbeSuccess = True
-
-
-				# Check if probe not required or if required it is successful (Filter Step)
-				if ProbeRequired.lower() in ['no','n'] or ProbeSuccess == True:
-
-					ProbeFilteringPP +=1
-
-					# Reverse complement the reverse primer to obtain actual primer sequence.
-					PPSet[-1] = getComplement(PPSet[-1],reverse=True)
-
-					# Filter sets which are not self-binding. ### TO DO AND IMPROVE ###
-					SelfBindingFilterPass = False
-
-					MaximumSBPercentageMatch = 0
-					MaximumSSPercentageMatch = 0
-
-
-					# Loop through index of seqs in set
-					for porpi in list(range(len(PPSet))):
-
-						PorpiTempPMCValue = CompareSequenceForMatches(PPSet[porpi],getComplement(PPSet[porpi]))
-
-						# Get list of other sequences in set.
-						OtherSequences = [oss for oss in PPSet if oss != PPSet[porpi]]
-
-						# Loop through other sequences
-						for osst in OtherSequences:
-
-							ReverseTempPMCValue = CompareSequenceForMatches(PPSet[porpi],getComplement(osst))
-							ReverseCompTempPMCValue = CompareSequenceForMatches(PPSet[porpi],getComplement(osst,reverse=True))
-
-							if MaximumSBPercentageMatch < max([PorpiTempPMCValue,ReverseTempPMCValue,ReverseCompTempPMCValue]):
-								MaximumSBPercentageMatch = max([PorpiTempPMCValue,ReverseTempPMCValue,ReverseCompTempPMCValue])
-
-						#Check Seq for SS ability:
-						SSPTempValue = CompareSequenceForMatches(PPSet[porpi],getComplement(PPSet[porpi],reverse=True))
-
-						if  MaximumSSPercentageMatch < SSPTempValue:
-							MaximumSSPercentageMatch = SSPTempValue
-
-
-					# Filter on percentage of matches to self-bind between members of primer set or form secondary structure.
-					if (MaximumSBPercentageMatch <= PrimerProbeSelfComplementaryBinding/100 and
-						MaximumSSPercentageMatch <= Lengthofregionswhichcantoleratesecondarystructure/100):
-
-						SSandSBFilterPP += 1
-
-						# Filter on background binding check if it is required.
-						if BackgroundCheckRequired.lower() in ['y',"yes"]:
-
-							BackgroundBindingMaxScore = BlastnBackgroundCheck(PPSet,BlastnPath,BlastnDBName,RunReferenceName)
-							if BackgroundBindingMaxScore <= BackgroundMatchCutOffPercentage:
-
-								BackgroundFilterPP += 1
-
-								# If set passess the filter append to final list
-								FilterSSets.append(PPSet)
-								FilteredSetPassed +=1
-
-								MaxBackgroundBS.append(BackgroundBindingMaxScore)
-
-						# If no background binding check is required:
-						else:
-
-							# If set passess all filtering stages add set to list.
-							FilterSSets.append(PPSet)
-
-							FilteredSetPassed +=1
-
-		print('Sets Total : Sets Assessed : Sets Passed: [{}:{}:{}]\r'.format(len(PrimerProbeBindingSiteSets),SetCounter,FilteredSetPassed), end="")
-
-	# Ask if user would like to continue if primers found but no all possibilities explored.
-	if (FilteredSetPassed != 0 and
-		SetCounter != len(PrimerProbeBindingSiteSets)):
-
-		ContinueSearch = input('{} Primer Sets Found, would you like to continue searching for more? [Yes/No] : '.format(FilteredSetPassed))
-		if ContinueSearch.lower() in ['n','no']:
-			break
-
-# Print output of filtering stages.
-print('\n\nPrimers Passed GCFiltering: [{}]\nPrimers Passed Repeat Region Filtering [{}]\nPrimers Passed Probe Filtering [{}]\nPrimers Passed Seconday Structure and Self-Binding Filtering [{}]'.format(GCFilteringPrimerPass,RRFilteringPP,ProbeFilteringPP,SSandSBFilterPP))
-
-
-if BackgroundCheckRequired.lower() == ['y','yes']:
-	print('Primers Passed Background Filtering [{}]\n'.format(BackgroundFilterPP))
-
-
-# Report if no primers were found
-if len(FilterSSets) == 0:
-	print('No primers passed the filtering stage')
-
-	sys.exit()
-
-
-# Export primers if filtering successful
-else:
-
-	ColumnsNamesTemp = ['Forward_Primer','{}_Probe'.format(ProbeRequired),'Reverse_Primer']
-	if ProbeRequired.lower() in ['no','n']:
-		ColumnsNamesTemp.remove('{}_Probe'.format(ProbeRequired))
-
-	OutputDataFrame = pd.DataFrame(FilterSSets,columns=ColumnsNamesTemp)
-
-	# Add necessary max Blastn score
-	if len(MaxBackgroundBS) != 0:
-		OutputDataFrame['Max_Blastn_Percentage_Match'] = MaxBackgroundBS
-
-	OutputDataFrame.to_csv('{}_PrimedRPA_Output.csv'.format(RunReferenceName),index=None)
-	print('\nPrimedRPA Run {} Complete!'.format(RunReferenceName))
-	print('\nIf you found this program useful please reference:\n\nM. Higgins et al., “PrimedRPA: primer design for recombinase polymerase amplification assays,”\nBioinformatics, vol. 35, no. 4, pp. 682–684, Feb. 2019.\n\n')
-	sys.exit()
+# Run Primer, Probe Design process
+CheckingAlignedOutputFile(AllParameter)

@@ -38,8 +38,31 @@ PrimedRPA
 The installation process is now complete. Please review the PrimedRPA_Parameters.txt to
 set up your first Primer / Probe search.
 
-### Note
 
-Please see the link below for a guided walk-through of the PrimedRPA primer design process: https://github.com/MatthewHiggins2017/PrimedRPA/wiki/Example-Run
+### Key Output Files
+
+For each PrimedRPA run the following 3 key files are generated:
+
+```
+[RunID]_Alignment_Summary.csv
+[RunID]_Oligo_Binding_Sites.csv
+[RunID]_Output_Sets.csv
+```
+
+### Walk-Through
+
+Please see the wiki for more information, including a step-by-step walk through of using the software.
+
+## 3rd-Party Software
+
+PrimerRPA incoporates the following 3rd party software:
+
+Clustal Omega (http://www.clustal.org/omega/) - For sequence alignment if necessary.<br/>
+Blastn (https://blast.ncbi.nlm.nih.gov/Blast.cgi)- To assess primer/probe cross reactivity against potential background sequences. 
+
+
+
+### Contact
+
 
 If you encounter any bugs please contact me directly at **matthew.higgins[at]lshtm.ac.uk**
