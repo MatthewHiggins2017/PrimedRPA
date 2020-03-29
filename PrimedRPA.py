@@ -714,7 +714,7 @@ if 'PrimedRPA_Parameters.txt' in sys.argv[1]:
 			MinGC = int(u[11])
 			MaxGC = int(u[12])
 			DimerisationThresh = int(u[13])
-			BackgroundCheck = str(u[14]).upper()
+			BackgroundCheck = str(u[14])
 			CrossReactivityThresh = int(u[15])
 			MaxSets = int(u[16])
 			Threads = int(u[17])
