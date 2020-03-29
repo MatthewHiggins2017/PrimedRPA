@@ -543,7 +543,7 @@ def CheckingAlignedOutputFile(AllParameter):
 			print('Reading Alignment Summary')
 			MergedAlignedDF = pd.read_csv('{}'.format(AllParameter.PriorAlign))
 			HDFLST = list(range(len(MergedAlignedDF)))
-			HomoDFInputIndexBlocks = [HDFLST[i:i + 1000] for i in range(0, len(HDFLST), 1000)]
+			HomoDFInputIndexBlocks = [HDFLST[i:i + AllParameter.Threads] for i in range(0, len(HDFLST), AllParameter.Threads)]
 
 
 		# Create Alignment DF if it doesnt exist
@@ -577,7 +577,7 @@ def CheckingAlignedOutputFile(AllParameter):
 
 			# Generate Neccessary Alignment Summary DF
 			HDFLST = list(range(FastaSeqLength))
-			HomoDFInputIndexBlocks = [HDFLST[i:i + 1000] for i in range(0, len(HDFLST), 1000)]
+			HomoDFInputIndexBlocks = [HDFLST[i:i + AllParameter.Threads] for i in range(0, len(HDFLST), AllParameter.Threads)]
 			MTDFOVI = list(zip([fastadict]*len(HomoDFInputIndexBlocks),HomoDFInputIndexBlocks))
 			with Pool(processes=AllParameter.Threads) as pool:
 				AlignedDFMultiThreadOupt = pool.starmap(CreatingInputHomologyDF,MTDFOVI)
