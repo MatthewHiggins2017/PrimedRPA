@@ -55,10 +55,10 @@ Please see the wiki for more information, including a step-by-step walk through 
 
 ### 3rd-Party Software
 
-PrimerRPA incoporates the following 3rd party software:
+PrimerRPA incorporates the following 3rd party software:
 
 Clustal Omega (http://www.clustal.org/omega/) - For sequence alignment if necessary.<br/>
-Blastn (https://blast.ncbi.nlm.nih.gov/Blast.cgi)- To assess primer/probe cross reactivity against potential background sequences. 
+Blastn (https://blast.ncbi.nlm.nih.gov/Blast.cgi)- To assess primer/probe cross reactivity against potential background sequences.
 
 
 
