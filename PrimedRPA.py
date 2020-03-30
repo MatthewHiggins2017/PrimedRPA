@@ -34,6 +34,7 @@ def RunningClustalo1(ClustalOPath,
 					ListOfFileNames,
 					overwriteOutput=True):
 
+	print('Aligning Input File')
 	for FileName in ListOfFileNames:
 		OutputName = FileName.replace(".fasta",'_Aligned.fasta')
 		command = "{0} -i {1} -o {2} --outfmt=fasta".format(ClustalOPath,FileName, OutputName)
@@ -680,14 +681,12 @@ def CheckingAlignedOutputFile(AllParameter):
 ########################################################################################################################
 
 
-# Basic Command Line User Interface
 print('\n\n')
 print('-------------------------------------------')
 print('----------------PrimedRPA------------------')
 print('-----Finding RPA Primer and Probe Sets-----')
 print('-------------Higgins M et al.--------------')
 print('-------------------------------------------\n\n')
-
 
 
 
@@ -768,7 +767,7 @@ FileLocationsCheckList = [AllParameter.PriorAlign,
 						  AllParameter.InputFile]
 
 for FL in FileLocationsCheckList:
-	if FL != 'NO':
+	if (FL != 'NO' and FL != ''):
 		if FL not in glob.glob(FL):
 			print('File Not Found: {}'.format(FL))
 			sys.exit()
