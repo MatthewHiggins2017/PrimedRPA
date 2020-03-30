@@ -255,7 +255,7 @@ def IndentifyingAndFilteringOligos(AllParameter,
 			OligoType = 'Probe'
 
 		# Add in ability to handle specified range or primer or probe values.
-		if '-' in TSLP:
+		if '-' in str(TSLP):
 			TSLRangePrior = [int(TSLI) for TSLI in TSLP.split('-')]
 			TSLList = list(range(TSLRangePrior[0],TSLRangePrior[1]+1))
 
@@ -308,7 +308,7 @@ def IndentifyingAndFilteringOligos(AllParameter,
 												   'Oligo_Type':OligoType,
 												   'Binding_Site_Start_Index':i,
 												   'Oligo_Length':TSL,
-												   'Conservation_Score':MeanHomologyScore,
+												   'Identity_Score':MeanHomologyScore,
 												   'GC_Content': GCPercentage,
 												   'Self Dimerisation / Secondary Structure Percentage':MaxBindingSites,
 												   'Self Dimerisation / Secondary Structure String':MaxBindingString}
@@ -343,8 +343,8 @@ def IndentifyingAndFilteringOligos(AllParameter,
 													os.remove('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput, NucleotideSeq))
 
 												else:
-													RowDict['Max Background Binding Score'] = MaxBackgroundScoreBindingScore
-													RowDict['Max Background Binding SeqID'] = MaxScoreBackSeq
+													RowDict['Max Background Cross Reactivity Score'] = MaxBackgroundScoreBindingScore
+													RowDict['Max Background Cross Reactivity SeqID'] = MaxScoreBackSeq
 
 
 											# If it passed Background Filtering
@@ -408,6 +408,7 @@ def ComboIdentifyier(PrimerSS,ReversePrimerSS,ProbeSS,AllParameter,PassedOligos,
 				MaxComboSSScore = SSMaxBindingSites
 				MaxComboSSString = SSMaxBindingString
 
+
 		if MaxComboSSScore > AllParameter.DimerisationThresh:
 			DimerisationPass = False
 
@@ -447,12 +448,12 @@ def ComboIdentifyier(PrimerSS,ReversePrimerSS,ProbeSS,AllParameter,PassedOligos,
 					MaxBackgroundScoreBindingScore = 0
 					MaxScoreBackSeq = ''
 					for SucIndex in MaxBackgroundScoresIndexes:
-						if PassedOligos.loc[SucIndex,'Max Background Binding Score'] > MaxBackgroundScoreBindingScore:
-							MaxBackgroundScoreBindingScore = PassedOligos.loc[SucIndex,'Max Background Binding Score']
-							MaxScoreBackSeq = PassedOligos.loc[SucIndex,'Max Background Binding SeqID']
+						if PassedOligos.loc[SucIndex,'Max Background Cross Reactivity Score'] > MaxBackgroundScoreBindingScore:
+							MaxBackgroundScoreBindingScore = PassedOligos.loc[SucIndex,'Max Background Cross Reactivity Score']
+							MaxScoreBackSeq = PassedOligos.loc[SucIndex,'Max Background Cross Reactivity SeqID']
 
 
-					PassedComboRow['Max Background Binding Score'] = MaxBackgroundScoreBindingScore
+					PassedComboRow['Max Background Cross Reactivity Score'] = MaxBackgroundScoreBindingScore
 					PassedComboRow['Max Background Binding Seq'] = MaxScoreBackSeq
 
 
@@ -469,13 +470,15 @@ def CheckingAlignedOutputFile(AllParameter):
 	if AllParameter.PriorBindingSite != 'NO':
 
 		print('Reading In Oligo Binding Sites')
+
 		PassedOligos = pd.read_csv('{}'.format(AllParameter.PriorBindingSite))
+
 
 		# Filter on Parameters Passed In
 		PassedOligos = PassedOligos[(PassedOligos['GC_Content']>=AllParameter.MinGC)&
 									(PassedOligos['GC_Content']<=AllParameter.MaxGC)&
 									(PassedOligos['Self Dimerisation / Secondary Structure Percentage']<=AllParameter.DimerisationThresh)&
-									(PassedOligos['Conservation_Score']>=AllParameter.IdentityThreshold)]
+									(PassedOligos['Identity_Score']>=AllParameter.IdentityThreshold)]
 
 
 		# Filter on Primer + Probe Ranges - (Tidy Up At Later Date)
@@ -488,7 +491,7 @@ def CheckingAlignedOutputFile(AllParameter):
 			else:
 				LLType = 'Probe'
 
-			if '-' in LL:
+			if '-' in str(LL):
 				LLRangePrior = [int(LLLI.strip()) for LLLI in LL.split('-')]
 				PPLengthDict['{}_Max'.format(LLType)] = max(LLRangePrior)
 				PPLengthDict['{}_Min'.format(LLType)] = min(LLRangePrior)
@@ -523,11 +526,9 @@ def CheckingAlignedOutputFile(AllParameter):
 		PassedOligos = pd.concat([PrimerPassedSubet,ProbePassedSubet]).reset_index().drop(['index'],axis=1)
 
 
-
 		# If Background Check is Present filter
 		if AllParameter.BackgroundCheck == 'YES':
-			PassedOligos = PassedOligos[PassedOligos['Max Background Binding Score']<=AllParameter.CrossReactivityThresh]
-
+			PassedOligos = PassedOligos[PassedOligos['Max Background Cross Reactivity Score']<=AllParameter.CrossReactivityThresh]
 
 
 		##Check If No Primers Passed Subset
@@ -610,9 +611,6 @@ def CheckingAlignedOutputFile(AllParameter):
 
 
 
-
-
-
 	# Identify Primer-Probe Sets
 	print('Identifying Valid Primer-Probe Combinations')
 	FinalOutputDF = pd.DataFrame()
@@ -690,69 +688,77 @@ print('-----Finding RPA Primer and Probe Sets-----')
 print('-------------Higgins M et al.--------------')
 print('-------------------------------------------\n\n')
 
-# Utilise Either Parameters File Or Command Line Interface
-if 'PrimedRPA_Parameters.txt' in sys.argv[1]:
-
-	# Import and Extract Parameters
-	parametersFile = sys.argv[1]
-	try:
-		paraFile = open(parametersFile,"r")
-		iu = []
-		for line in paraFile.readlines():
-			if ">" in line:
-				n = line.strip('\n')
-				h = n.strip('>')
-				iu.append(h)
-		u = iu[1:]
-
-		class AllParameter:
-			RunID = str(u[0])
-			PriorAlign = str(u[1])
-			PriorBindingSite = str(u[2])
-			InputFile = str(u[3])
-			InputFileType = str(u[4])
-			IdentityThreshold = int(u[5])/100
-			PrimerLength = u[6].strip()
-			ProbeRequired = str(u[7]).upper()
-			ProbeLength = u[8].strip()
-			AmpliconSizeLimit = int(u[9])
-			NucleotideRepeatLimit = int(u[10])
-			MinGC = int(u[11])
-			MaxGC = int(u[12])
-			DimerisationThresh = int(u[13])
-			BackgroundCheck = str(u[14])
-			CrossReactivityThresh = int(u[15])
-			MaxSets = int(u[16])
-			Threads = int(u[17])
 
 
-	except:
-		print('Parameters File Could Not Be Opened\nCheck File Path.')
-		sys.exit()
 
-else:
+try:
+	# Utilise Either Parameters File Or Command Line Interface
+	if 'PrimedRPA_Parameters.txt' in sys.argv[1]:
 
-	parser = argparse.ArgumentParser()
-	parser.add_argument('--RunID', help='Desired Run ID', required=True)
-	parser.add_argument('--PriorAlign', help='Optional: Path to Prior Binding File',default='NO')
-	parser.add_argument('--PriorBindingSite', help='Optional: Path to Prior Binding File',default='NO')
-	parser.add_argument('--InputFile', help='Path to Input File',default='NO')
-	parser.add_argument('--InputFileType', help='Options [SS,MS,MAS]')
-	parser.add_argument('--IdentityThreshold', help='Desired Identity Threshold',default=0.99)
-	parser.add_argument('--PrimerLength', help='Desired Primer Length',type=str,default='30')
-	parser.add_argument('--ProbeRequired', help='Options [NO,EXO,NFO]',type=str,default='NO')
-	parser.add_argument('--ProbeLength', help='Desired Probe Length',default='50')
-	parser.add_argument('--AmpliconSizeLimit', help='Amplicon Size Limit',default=500)
-	parser.add_argument('--NucleotideRepeatLimit', help='Nucleotide Repeat Limit (i.e 5 = AAAAA)',default=5)
-	parser.add_argument('--MinGC', help='Minimum GC Content',default=30)
-	parser.add_argument('--MaxGC', help='Maximum GC Content',default=70)
-	parser.add_argument('--DimerisationThresh', help='Percentage Dimerisation Tolerated',default=40)
-	parser.add_argument('--BackgroundCheck', help='Options [NO, Path To Background Fasta File]',default='NO')
-	parser.add_argument('--CrossReactivityThresh', help='Max Cross Reactivity Threshold',default=60)
-	parser.add_argument('--MaxSets', help='Default Set To 100',default=100)
-	parser.add_argument('--Threads', help='Default Set To 1',default=1)
-	AllParameter = parser.parse_args()
+		# Import and Extract Parameters
+		parametersFile = sys.argv[1]
+		try:
+			paraFile = open(parametersFile,"r")
+			iu = []
+			for line in paraFile.readlines():
+				if ">" in line:
+					n = line.strip('\n')
+					h = n.strip('>')
+					iu.append(h)
+			u = iu[1:]
 
+			class AllParameter:
+				RunID = str(u[0])
+				PriorAlign = str(u[1])
+				PriorBindingSite = str(u[2])
+				InputFile = str(u[3])
+				InputFileType = str(u[4])
+				IdentityThreshold = int(u[5])/100
+				PrimerLength = u[6].strip()
+				ProbeRequired = str(u[7]).upper()
+				ProbeLength = u[8].strip()
+				AmpliconSizeLimit = int(u[9])
+				NucleotideRepeatLimit = int(u[10])
+				MinGC = int(u[11])
+				MaxGC = int(u[12])
+				DimerisationThresh = int(u[13])
+				BackgroundCheck = str(u[14])
+				CrossReactivityThresh = int(u[15])
+				MaxSets = int(u[16])
+				Threads = int(u[17])
+
+
+		except:
+			print('Parameters File Could Not Be Opened\nCheck File Path.')
+			sys.exit()
+
+	else:
+
+		parser = argparse.ArgumentParser()
+		parser.add_argument('--RunID', help='Desired Run ID', required=True)
+		parser.add_argument('--PriorAlign', help='Optional: Path to Prior Binding File',default='NO')
+		parser.add_argument('--PriorBindingSite', help='Optional: Path to Prior Binding File',default='NO')
+		parser.add_argument('--InputFile', help='Path to Input File',default='NO')
+		parser.add_argument('--InputFileType', help='Options [SS,MS,MAS]')
+		parser.add_argument('--IdentityThreshold', help='Desired Identity Threshold',default=0.99)
+		parser.add_argument('--PrimerLength', help='Desired Primer Length',type=str,default='30')
+		parser.add_argument('--ProbeRequired', help='Options [NO,EXO,NFO]',type=str,default='NO')
+		parser.add_argument('--ProbeLength', help='Desired Probe Length',type=str,default='50')
+		parser.add_argument('--AmpliconSizeLimit', help='Amplicon Size Limit',type=int,default=500)
+		parser.add_argument('--NucleotideRepeatLimit', help='Nucleotide Repeat Limit (i.e 5 = AAAAA)',type=int,default=5)
+		parser.add_argument('--MinGC', help='Minimum GC Content',type=int,default=30)
+		parser.add_argument('--MaxGC', help='Maximum GC Content',type=int,default=70)
+		parser.add_argument('--DimerisationThresh', help='Percentage Dimerisation Tolerated',type=int,default=40)
+		parser.add_argument('--BackgroundCheck', help='Options [NO, Path To Background Fasta File]',default='NO')
+		parser.add_argument('--CrossReactivityThresh', help='Max Cross Reactivity Threshold',type=int,default=60)
+		parser.add_argument('--MaxSets', help='Default Set To 100',type=int,default=100)
+		parser.add_argument('--Threads', help='Default Set To 1',type=int,default=1)
+		AllParameter = parser.parse_args()
+
+
+except:
+	print('PLease run PrimedRPA --help to see valid options')
+	sys.exit()
 
 
 # Check Files Defined Exist
