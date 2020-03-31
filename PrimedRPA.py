@@ -28,6 +28,29 @@ import pandas as pd
 from collections import Counter
 from multiprocessing import Pool
 import argparse
+import re
+
+
+def FastaToDict(InputFile):
+	fastadict = {}
+	with open(InputFile) as file_one:
+		for line in file_one:
+			line = line.strip()
+			if not line:
+				continue
+			if line.startswith(">"):
+				active_sequence_name = line[1:]
+				if active_sequence_name not in fastadict:
+					fastadict[active_sequence_name] = ''
+				continue
+			sequence = line
+			# If Uracil Present, Substitute for T (I.e. stick with 4 DNA bases)
+			fastadict[active_sequence_name] += re.sub('U','T',sequence.upper())
+	return fastadict
+
+
+
+
 
 # Wrapper for clustal omega
 def RunningClustalo1(ClustalOPath,
@@ -57,6 +80,8 @@ def getComplement(seq,
 			seqComp += "G"
 		elif base == "G":
 			seqComp += "C"
+		elif base == 'U':
+			seqComp += "A"
 		elif base == "N":
 			if rule == 'N2-':
 				seqComp += '-'
@@ -64,6 +89,11 @@ def getComplement(seq,
 				seqComp += "N"
 		elif base == "-":
 			seqComp += "N"
+
+		# If Character not any of above assign it as N
+		else:
+			seqComp += "N"
+
 	if reverse:
 		return(seqComp[::-1])
 	else:
@@ -85,9 +115,8 @@ def BlastnBackgroundCheck(seq,AllParameter):
 	tempfastainput.close()
 
 	#Triggure Blastn command
-	blastncommandrun = '{0} -task "blastn-short"  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps" '.format(AllParameter.BlastnPath,
-																																											 				   seq,
-																																											 			  	   AllParameter.BlastnDBName,
+	blastncommandrun = '{0} -task "blastn-short"  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps sstrand" '.format(AllParameter.BlastnPath,
+																																											 				   seq,																																	 			  	   AllParameter.BlastnDBName,
 																																											 			  	   AllParameter.PrimerBlastnOutput)
 	subprocess.call([blastncommandrun],shell=True)
 
@@ -95,18 +124,74 @@ def BlastnBackgroundCheck(seq,AllParameter):
 	try:
 
 		blastnoutdf = pd.read_csv('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput,seq),header=None)
-		blastnoutdf.columns=['Background_SeqID','Percentage Identity','qStart','qEnd','BackSeq_Start','BackSeq_End','Evalue','Number Of Gaps']
-
+		blastnoutdf.columns=['Background_SeqID','Percentage Identity','qStart','qEnd','BackSeq_Start','BackSeq_End','Evalue','Number Of Gaps','Strand']
 		blastnoutdf['Cross Reactivity Score'] = ((((blastnoutdf['qEnd']+1) - blastnoutdf['qStart'])*(blastnoutdf['Percentage Identity']/100))/len(seq))*100
-
 		blastnoutdf = blastnoutdf.sort_values(by=['Cross Reactivity Score'],ascending=False)
 
 
-		blastnoutdf.to_csv('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput,seq),index=None)
+		for blastoutindex in blastnoutdf.index.tolist():
 
+			ReferenceID = blastnoutdf.loc[blastoutindex,'Background_SeqID']
+			CleanRefID = ReferenceID[ReferenceID.find("|")+1:-1]
+
+			# If Background Seq Is (+) Sense
+			if blastnoutdf.loc[blastoutindex,'Strand']=='plus':
+
+				UpperExtension = (len(seq)-blastnoutdf.loc[blastoutindex,'qEnd']) + blastnoutdf.loc[blastoutindex,'BackSeq_End']
+				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] - blastnoutdf.loc[blastoutindex,'qStart']+1
+
+				SamToolsCommand = '{} faidx {} {}:{}-{} -o Adv_{}_{}.fa'.format(AllParameter.SamtoolsPath,
+															   AllParameter.BackgroundCheck,
+															   CleanRefID,
+															   LowerExtension,
+															   UpperExtension,
+															   seq,
+															   CleanRefID)
+
+			# If Background Seq Is (-) Sense
+			else:
+				UpperExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] +  blastnoutdf.loc[blastoutindex,'qStart']+1
+				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_End'] - (len(seq)-blastnoutdf.loc[blastoutindex,'qEnd'])
+
+				SamToolsCommand = '{} faidx -i {} {}:{}-{} -o Adv_{}_{}.fa'.format(AllParameter.SamtoolsPath,
+																			   AllParameter.BackgroundCheck,
+																			   CleanRefID,
+																			   LowerExtension,
+																			   UpperExtension,
+																			   seq,
+																			   CleanRefID)
+
+			# Run Samtools Command
+			subprocess.call([SamToolsCommand],shell=True)
+
+
+			# Obtain Sequence
+			fastadict = FastaToDict('Adv_{}_{}.fa'.format(seq,CleanRefID))
+
+			# Extract Sequence & Complement
+			ExtraSeq = list(fastadict.values())[0]
+			ComplementSeq = getComplement(ExtraSeq)
+
+
+			# Run SS Check Function
+			BackgroundMaxBindingPercentage, BackgroundMaxBindingString = SSIdentification(seq, ComplementSeq, False)
+
+			# Add to Blastn DataFrame
+			blastnoutdf.loc[blastoutindex,'Advanced Cross Reactivity Percentage'] = BackgroundMaxBindingPercentage
+			blastnoutdf.loc[blastoutindex,'Advanced Cross Reactivity Percentage String'] = BackgroundMaxBindingString
+
+
+			# Remove Advance Samtools Generated String
+			os.remove('Adv_{}_{}.fa'.format(seq,CleanRefID))
+
+
+		blastnoutdf = blastnoutdf.sort_values(by=['Advanced Cross Reactivity Percentage'],ascending=False)
+
+
+		blastnoutdf.to_csv('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput,seq),index=None)
 		IndexOfInterest = blastnoutdf.index.tolist()[0]
 
-		MaximumPercentageMatch = blastnoutdf.loc[IndexOfInterest,'Cross Reactivity Score']
+		MaximumPercentageMatch = blastnoutdf.loc[IndexOfInterest,'Advanced Cross Reactivity Percentage']
 		MaxHomologyBackgroundSeq = blastnoutdf.iloc[IndexOfInterest,0]
 
 	# If dataframe empty e.g. no alignments at all
@@ -143,13 +228,13 @@ def RunFluroProbeAnalysis(ProbeBindingSeq):
 
 
 # Secondary Structure Filter
-def SSIdentification(SeqOne, SeqTwo, threshold=4):
+def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, threshold=4):
 
 	# Nucleotide Dict
 	NucDict = {'A':'T',
 			   'T':'A',
 			   'C':'G',
-			   'G':'C'
+			   'G':'C',
 				}
 
 	# Maximum Binding sites
@@ -165,11 +250,19 @@ def SSIdentification(SeqOne, SeqTwo, threshold=4):
 	SeqTwoNorm = SeqTwo + ' '*(MaxLength-len(SeqTwo))
 	SeqTwoReversed = SeqTwo[::-1] + ' '*(MaxLength-len(SeqTwo))
 
+
+	if ReverseOrientation == True:
+		CombosToCheck = [(SeqTwoNorm,SeqOneNorm),
+						(SeqOneNorm,SeqTwoNorm),
+						(SeqOneNorm,SeqTwoReversed),
+						(SeqTwoReversed,SeqOneNorm)]
+	else:
+		CombosToCheck = [(SeqTwoNorm,SeqOneNorm),
+						(SeqOneNorm,SeqTwoNorm)]
+
+
 	# Loop through var pairs whereby the first element will be shifted
-	for VarPair in [(SeqTwoNorm,SeqOneNorm),
-					(SeqOneNorm,SeqTwoNorm),
-					(SeqOneNorm,SeqTwoReversed),
-					(SeqTwoReversed,SeqOneNorm)]:
+	for VarPair in CombosToCheck:
 
 		# Loop through possible shift positions
 		for i in list(range(VarPair[0].count(' ')+1)):
@@ -298,7 +391,7 @@ def IndentifyingAndFilteringOligos(AllParameter,
 
 									# Run Secondary Structure Check / Self Dimerisation
 									SDSSFilterPass=True
-									MaxBindingSites, MaxBindingString = SSIdentification(NucleotideSeq,NucleotideSeq)
+									MaxBindingSites, MaxBindingString = SSIdentification(NucleotideSeq,NucleotideSeq,True)
 									if MaxBindingSites > AllParameter.DimerisationThresh:
 										SDSSFilterPass=False
 
@@ -311,9 +404,8 @@ def IndentifyingAndFilteringOligos(AllParameter,
 												   'Oligo_Length':TSL,
 												   'Identity_Score':MeanHomologyScore,
 												   'GC_Content': GCPercentage,
-												   'Self Dimerisation / Secondary Structure Percentage':MaxBindingSites,
-												   'Self Dimerisation / Secondary Structure String':MaxBindingString}
-
+												   'Dimerisation Percentage Score':MaxBindingSites,
+												   'Dimerisation String':MaxBindingString}
 
 										# Assess if Specific Probe Check is Needed.
 										ProbePass = True
@@ -335,12 +427,14 @@ def IndentifyingAndFilteringOligos(AllParameter,
 												# Run Blastn Check And If Passess Write Out Set
 												MaxBackgroundScoreBindingScore, MaxScoreBackSeq  = BlastnBackgroundCheck(NucleotideSeq, AllParameter)
 
+												# Remove Temp Input File
+												os.remove('{}/{}_Blastn_Input.fa'.format(AllParameter.PrimerBlastnOutput, NucleotideSeq))
 
 												# Check to see if Max Binding Score Less Than Threshold
 												if MaxBackgroundScoreBindingScore > AllParameter.CrossReactivityThresh:
 													BlastnPass = False
+
 													# Remove Background If Neccessary
-													os.remove('{}/{}_Blastn_Input.fa'.format(AllParameter.PrimerBlastnOutput, NucleotideSeq))
 													os.remove('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput, NucleotideSeq))
 
 												else:
@@ -403,7 +497,7 @@ def ComboIdentifyier(PrimerSS,ReversePrimerSS,ProbeSS,AllParameter,PassedOligos,
 		MaxComboSSScore = 0
 		MaxComboSSString = ''
 		for SSSCombo in list(itertools.combinations(ComboSeqList,r=2)):
-			SSMaxBindingSites, SSMaxBindingString = SSIdentification(SSSCombo[0],SSSCombo[1])
+			SSMaxBindingSites, SSMaxBindingString = SSIdentification(SSSCombo[0],SSSCombo[1],True)
 
 			if SSMaxBindingSites > MaxComboSSScore:
 				MaxComboSSScore = SSMaxBindingSites
@@ -428,8 +522,8 @@ def ComboIdentifyier(PrimerSS,ReversePrimerSS,ProbeSS,AllParameter,PassedOligos,
 								  'RP GC%': PassedOligos.loc[RPIndex,'GC_Content'],
 								  'RP Binding Start Site': PassedOligos.loc[RPIndex,'Binding_Site_Start_Index'],
 								  'Amplicon Size': PassedOligos.loc[RPIndex,'Binding_Site_Start_Index'] + RPrimerL - PassedOligos.loc[FPIndex,'Binding_Site_Start_Index'],
-								  'Max Secondary Structure / Dimerisation Percentage Score':SSMaxBindingSites,
-								  'Max Secondary Structure / Dimerisation String':MaxComboSSString,
+								  'Max Dimerisation Percentage Score':SSMaxBindingSites,
+								  'Max Dimerisation String':MaxComboSSString,
 								  'Forward Primer Length':FPrimerL,
 								  'Reverse Primer Length':RPrimerL
 								  }
@@ -478,7 +572,7 @@ def CheckingAlignedOutputFile(AllParameter):
 		# Filter on Parameters Passed In
 		PassedOligos = PassedOligos[(PassedOligos['GC_Content']>=AllParameter.MinGC)&
 									(PassedOligos['GC_Content']<=AllParameter.MaxGC)&
-									(PassedOligos['Self Dimerisation / Secondary Structure Percentage']<=AllParameter.DimerisationThresh)&
+									(PassedOligos['Dimerisation Percentage Score']<=AllParameter.DimerisationThresh)&
 									(PassedOligos['Identity_Score']>=AllParameter.IdentityThreshold)]
 
 
@@ -557,20 +651,10 @@ def CheckingAlignedOutputFile(AllParameter):
 		# Create Alignment DF if it doesnt exist
 		else:
 			print('Generating Alignment Summary')
+
+
 			# Read in the aligned fasta sequences
-			fastadict = {}
-			with open(AllParameter.InputFile) as file_one:
-				for line in file_one:
-					line = line.strip()
-					if not line:
-						continue
-					if line.startswith(">"):
-						active_sequence_name = line[1:]
-						if active_sequence_name not in fastadict:
-							fastadict[active_sequence_name] = ''
-						continue
-					sequence = line
-					fastadict[active_sequence_name] += sequence.upper()
+			fastadict = FastaToDict(AllParameter.InputFile)
 
 			# Extract Alignment Length and QC
 			FirstSeq = True
@@ -779,6 +863,7 @@ InstalledSourceScriptPath = os.path.realpath(__file__)
 AllParameter.BlastnPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/blastn')
 AllParameter.BlastnDBCreationPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/makeblastdb')
 AllParameter.ClustalOPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/clustalo')
+AllParameter.SamtoolsPath = InstalledSourceScriptPath.replace('PrimedRPA.py','Tool_Dependancies/bin/samtools')
 
 
 # Create Blastn Database if neccessary

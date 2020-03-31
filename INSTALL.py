@@ -25,6 +25,7 @@ import sys
 import pandas as pd
 
 OperatingSystem = sys.platform
+PrimedRPAPath = os.path.dirname(os.path.realpath(__file__))
 
 
 # Stage One = Sorting Out Program Dependencies Folder
@@ -52,6 +53,12 @@ elif OperatingSystem == "win32" or 'win64':
 
 for dp in ['clustalo','blastn','makeblastdb']:
     subprocess.run('chmod u+x ./Tool_Dependancies/{}'.format(dp),shell=True)
+
+
+# Install And Establish Samtools - Commands Shown Below
+SamtoolsInstall = 'cd {0}/Tool_Dependancies/ ;wget https://github.com/samtools/samtools/releases/download/1.10/samtools-1.10.tar.bz2 ;tar -xf samtools-1.10.tar.bz2; cd ./samtools-1.10 ; ./configure --prefix=/{0}/Tool_Dependancies/; make; make install; chmod u+x {0}/Tool_Dependancies/bin/samtools; cd {0}'.format(PrimedRPAPath)
+subprocess.run(SamtoolsInstall,shell=True)
+
 
 
 # Stage Two = File Presence
