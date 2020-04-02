@@ -5,8 +5,8 @@
 #  Higgins M et al. Submitted. 2018                                 #
 #                                                                   #
 #  Dependencies:                                                    #
-#     Python 3.7
-#     Glob 0.6
+#     Python 3.7													#
+#     Glob 0.6														#
 #     Pandas 0.20.3                                                 #
 #     Sys 3.6.3                                                     #
 #     Bio 1.70                                                      #
@@ -29,6 +29,7 @@ from collections import Counter
 from multiprocessing import Pool
 import argparse
 import re
+from pyfaidx import Fasta as PyFad
 
 
 def FastaToDict(InputFile):
@@ -107,6 +108,7 @@ def BlastnBackgroundCheck(seq,AllParameter):
 
 	MaxBackgroundScoreBindingScore = 0
 	MaxScoreBackSeq = ''
+	HardFailBoolean = False
 
 
 	#Create temp fasta file
@@ -115,13 +117,15 @@ def BlastnBackgroundCheck(seq,AllParameter):
 	tempfastainput.close()
 
 	#Triggure Blastn command
-	blastncommandrun = '{0} -task "blastn-short"  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps sstrand" '.format(AllParameter.BlastnPath,
+	blastncommandrun = '{0} -word_size 4 -gapopen 5 -gapextend 2 -reward 1 -penalty -3  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps sstrand" '.format(AllParameter.BlastnPath,
 																																											 				   seq,																																	 			  	   AllParameter.BlastnDBName,
 																																											 			  	   AllParameter.PrimerBlastnOutput)
 	subprocess.call([blastncommandrun],shell=True)
 
 	# Try to read dataframe (may be empty if no alignments found)
 	try:
+
+		ShorterBackground = False
 
 		blastnoutdf = pd.read_csv('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput,seq),header=None)
 		blastnoutdf.columns=['Background_SeqID','Percentage Identity','qStart','qEnd','BackSeq_Start','BackSeq_End','Evalue','Number Of Gaps','Strand']
@@ -132,67 +136,64 @@ def BlastnBackgroundCheck(seq,AllParameter):
 		for blastoutindex in blastnoutdf.index.tolist():
 
 			ReferenceID = blastnoutdf.loc[blastoutindex,'Background_SeqID']
-			CleanRefID = ReferenceID[ReferenceID.find("|")+1:-1]
+			if ReferenceID.count("|") == 2:
+				CleanRefID = ReferenceID[ReferenceID.find("|")+1:-1]
+			else:
+				CleanRefID = ReferenceID
 
 			# If Background Seq Is (+) Sense
 			if blastnoutdf.loc[blastoutindex,'Strand']=='plus':
 
 				UpperExtension = (len(seq)-blastnoutdf.loc[blastoutindex,'qEnd']) + blastnoutdf.loc[blastoutindex,'BackSeq_End']
-				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] - blastnoutdf.loc[blastoutindex,'qStart']+1
+				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] - blastnoutdf.loc[blastoutindex,'qStart']
 
-				SamToolsCommand = '{} faidx {} {}:{}-{} -o Adv_{}_{}.fa'.format(AllParameter.SamtoolsPath,
-															   AllParameter.BackgroundCheck,
-															   CleanRefID,
-															   LowerExtension,
-															   UpperExtension,
-															   seq,
-															   CleanRefID)
+				if LowerExtension<0:
+					LowerExtension = 0
+					ShorterBackground = True
+
 
 			# If Background Seq Is (-) Sense
 			else:
-				UpperExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] +  blastnoutdf.loc[blastoutindex,'qStart']+1
-				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_End'] - (len(seq)-blastnoutdf.loc[blastoutindex,'qEnd'])
-
-				SamToolsCommand = '{} faidx -i {} {}:{}-{} -o Adv_{}_{}.fa'.format(AllParameter.SamtoolsPath,
-																			   AllParameter.BackgroundCheck,
-																			   CleanRefID,
-																			   LowerExtension,
-																			   UpperExtension,
-																			   seq,
-																			   CleanRefID)
-
-			# Run Samtools Command
-			subprocess.call([SamToolsCommand],shell=True)
+				UpperExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] +  blastnoutdf.loc[blastoutindex,'qStart']-1
+				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_End'] - (len(seq)-blastnoutdf.loc[blastoutindex,'qEnd'])-1
 
 
-			# Obtain Sequence
-			fastadict = FastaToDict('Adv_{}_{}.fa'.format(seq,CleanRefID))
+				if LowerExtension<0:
+					LowerExtension = 0
+					ShorterBackground = True
 
-			# Extract Sequence & Complement
-			ExtraSeq = list(fastadict.values())[0]
-			ComplementSeq = getComplement(ExtraSeq)
+
+			TempLoadBackSeq = PyFad(AllParameter.BackgroundCheck)
+
+			if blastnoutdf.loc[blastoutindex,'Strand']=='plus':
+				ExtraSeq = TempLoadBackSeq[CleanRefID][LowerExtension:UpperExtension].seq
+				ComplementSeq = getComplement(ExtraSeq)
+			else:
+				ExtraSeq = TempLoadBackSeq[CleanRefID][LowerExtension:UpperExtension].reverse.complement.seq
+				ComplementSeq = getComplement(ExtraSeq)
 
 
 			# Run SS Check Function
-			BackgroundMaxBindingPercentage, BackgroundMaxBindingString = SSIdentification(seq, ComplementSeq, False)
+			BackgroundMaxBindingPercentage, BackgroundMaxBindingString, BackgroundHardFail, BackgroundString = SSIdentification(seq, ComplementSeq, False, ShorterBackground)
 
 			# Add to Blastn DataFrame
 			blastnoutdf.loc[blastoutindex,'Advanced Cross Reactivity Percentage'] = BackgroundMaxBindingPercentage
 			blastnoutdf.loc[blastoutindex,'Advanced Cross Reactivity Percentage String'] = BackgroundMaxBindingString
-
-
-			# Remove Advance Samtools Generated String
-			os.remove('Adv_{}_{}.fa'.format(seq,CleanRefID))
+			blastnoutdf.loc[blastoutindex,'Cross Reactivity Hard Fail'] = BackgroundHardFail
+			blastnoutdf.loc[blastoutindex,'Cross Reactivity Hard Fail String'] = BackgroundString
 
 
 		blastnoutdf = blastnoutdf.sort_values(by=['Advanced Cross Reactivity Percentage'],ascending=False)
-
-
 		blastnoutdf.to_csv('{}/{}_Blastn_Output.csv'.format(AllParameter.PrimerBlastnOutput,seq),index=None)
 		IndexOfInterest = blastnoutdf.index.tolist()[0]
 
 		MaximumPercentageMatch = blastnoutdf.loc[IndexOfInterest,'Advanced Cross Reactivity Percentage']
 		MaxHomologyBackgroundSeq = blastnoutdf.iloc[IndexOfInterest,0]
+
+
+		if True in blastnoutdf['Cross Reactivity Hard Fail'].unique():
+			HardFailBoolean = True
+
 
 	# If dataframe empty e.g. no alignments at all
 	except pd.errors.EmptyDataError:
@@ -202,7 +203,7 @@ def BlastnBackgroundCheck(seq,AllParameter):
 		MaxBackgroundScoreBindingScore = MaximumPercentageMatch
 		MaxScoreBackSeq = MaxHomologyBackgroundSeq
 
-	return (MaxBackgroundScoreBindingScore, MaxScoreBackSeq)
+	return (MaxBackgroundScoreBindingScore, MaxScoreBackSeq, HardFailBoolean)
 
 
 # Creates Exo Fluorescent Probe
@@ -228,7 +229,7 @@ def RunFluroProbeAnalysis(ProbeBindingSeq):
 
 
 # Secondary Structure Filter
-def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, threshold=4):
+def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, FixedBack=False ,threshold=4):
 
 	# Nucleotide Dict
 	NucDict = {'A':'T',
@@ -241,6 +242,11 @@ def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, threshold=4):
 	MaxBindingSites = 0
 	MaxBindingString = ''
 	MaxBindingPercentage = 0
+
+	# Hard Fail Sites
+	MaxHardFailScore = 0
+	HardFail = False
+	HardFailString = ''
 
 	# Max length of string according to shift.
 	MaxLength = len(SeqOne) + len(SeqTwo) - 1
@@ -261,11 +267,14 @@ def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, threshold=4):
 						(SeqOneNorm,SeqTwoNorm)]
 
 
+
+
 	# Loop through var pairs whereby the first element will be shifted
 	for VarPair in CombosToCheck:
 
 		# Loop through possible shift positions
 		for i in list(range(VarPair[0].count(' ')+1)):
+
 
 			if i == 0:
 				DynamicSeq = VarPair[0]
@@ -274,6 +283,7 @@ def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, threshold=4):
 
 			DyanimicSeqList = list(DynamicSeq)
 			FixedSeqList = list(VarPair[1])
+
 
 			# This shall house the syntax to represent binding
 			PossibleBindingString = ''
@@ -290,15 +300,72 @@ def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, threshold=4):
 			NumberOfBindingMatches = PossibleBindingString.count('|')
 			CompleteBindingString = DynamicSeq + '\n' + PossibleBindingString + '\n' + VarPair[1]
 
+			########################### NEW ####################################
+
+			# Fixed String
+			if VarPair[1] == SeqOneNorm:
+				FiveIndex = 0
+				ThreeIndex = len(SeqOne)
+
+			# Dyamic String
+			else:
+				FiveIndex = i
+				ThreeIndex = i + len(SeqOne)
+
+
+			UpperLimit = FiveIndex+22
+			LowerLimit = ThreeIndex-22
+			if LowerLimit <0:
+				LowerLimit = 0
+
+
+			# Determine 5 Prime Counts
+			FivePrimeCounts = PossibleBindingString[FiveIndex:UpperLimit]
+
+			# Determine 3 Prime Counts
+			ThreePrimeCounts = PossibleBindingString[LowerLimit:ThreeIndex]
+
+
+			weightings = [3,2,1.5]
+			ThreePrimeLoc = [-1,-2,-3]
+			FivePrimeLoc = [0,1,2]
+
+
+			OriginalScore = [FivePrimeCounts,ThreePrimeCounts]
+			IndexLocations = [FivePrimeLoc,ThreePrimeLoc]
+
+			AdjustedWeights = []
+			for ib in [0,1]:
+				TempScore = OriginalScore[ib].count('|')
+				Indexes = IndexLocations[ib]
+				for iz in list(zip(Indexes,weightings)):
+					if OriginalScore[ib][iz[0]] == '|':
+						TempScore += iz[1] - 1
+				AdjustedWeights.append(TempScore)
+
+			if max(AdjustedWeights) >= 21.5:
+				HardFail = True
+				HardFailString = CompleteBindingString
+
+			########################### NEW ####################################
 
 			if MaxBindingSites < NumberOfBindingMatches:
 				MaxBindingSites = NumberOfBindingMatches
 				MaxBindingString = CompleteBindingString
-				MaxBindingPercentage = (MaxBindingSites/min([len(SeqOne),len(SeqTwo)]))*100
+
+				if FixedBack == False:
+					Denom = min([len(SeqOne),len(SeqTwo)])
+				else:
+					Denom = len(SeqOne)
+
+				MaxBindingPercentage = (MaxBindingSites/Denom)*100
+
+	return (MaxBindingPercentage,MaxBindingString, HardFail, HardFailString)
 
 
-	#SSPossibilitiesDF = SSPossibilitiesDF.sort_values(by=['Complementary_Bases'], ascending=False)
-	return (MaxBindingPercentage,MaxBindingString)
+
+
+
 
 
 # Creating Alignment DF Multithread Function
@@ -325,7 +392,7 @@ def CreatingInputHomologyDF(fastadict,FastaIndexList):
 				NRepresentation = -100 #Harsh weighting against splits
 			else:
 				NRepresentation = TempNucleotides.count(MostCommonN)/len(TempNucleotides)
-		AlignedDF = AlignedDF.append({'Index_Pos':seqindex,'Nucleotide':MostCommonN,'Abundance':NRepresentation},ignore_index=True)
+		AlignedDF = AlignedDF.append({'Index_Pos':seqindex,'Nucleotide':MostCommonN,'IdentityScore':NRepresentation},ignore_index=True)
 
 
 	return AlignedDF
@@ -366,10 +433,29 @@ def IndentifyingAndFilteringOligos(AllParameter,
 				if i+TSL<len(AlignedDF)-TSL:
 
 					DFSubSet = AlignedDF[(AlignedDF['Index_Pos']>=i)&(AlignedDF['Index_Pos']<=(i+TSL-1))]
-					MeanHomologyScore = DFSubSet['Abundance'].mean()
+					MeanHomologyScore = DFSubSet['IdentityScore'].mean()
 
 
-					if MeanHomologyScore > AllParameter.IdentityThreshold:
+					############################## NEW ######################### - Triple Check #####################
+					# Determine 3' consective Identity - filter at later date when creating combos
+					# Determine 5' consecutive identity - filter at later date when creating combos
+					IDSList = DFSubSet['IdentityScore'].tolist()
+					OutIDScore = []
+					for IDSO in [IDSList,IDSList[::-1]]:
+						IDScore = 0
+						for SCI in list(range(len(IDSO))):
+							if float(IDSO[SCI]) == 1.0:
+								IDScore +=1
+							else:
+								break
+						OutIDScore.append(IDScore)
+
+
+					ThreePrimeIdentityScore = OutIDScore[1]
+					FivePrimerIdentityScore = OutIDScore[0]
+					############################## NEW ######################### - Triple Check #####################
+
+					if MeanHomologyScore >= (AllParameter.IdentityThreshold/100):
 						NucleotideSeq = ''.join(DFSubSet['Nucleotide'].tolist())
 						NucleotideSeq = NucleotideSeq.upper()
 
@@ -391,7 +477,7 @@ def IndentifyingAndFilteringOligos(AllParameter,
 
 									# Run Secondary Structure Check / Self Dimerisation
 									SDSSFilterPass=True
-									MaxBindingSites, MaxBindingString = SSIdentification(NucleotideSeq,NucleotideSeq,True)
+									MaxBindingSites, MaxBindingString, IgnoreThresh, IgnoreString = SSIdentification(NucleotideSeq,NucleotideSeq,True)
 									if MaxBindingSites > AllParameter.DimerisationThresh:
 										SDSSFilterPass=False
 
@@ -405,7 +491,9 @@ def IndentifyingAndFilteringOligos(AllParameter,
 												   'Identity_Score':MeanHomologyScore,
 												   'GC_Content': GCPercentage,
 												   'Dimerisation Percentage Score':MaxBindingSites,
-												   'Dimerisation String':MaxBindingString}
+												   'Dimerisation String':MaxBindingString,
+												   '3 prime conserved identity':ThreePrimeIdentityScore,
+												   '5 prime conserved identity':FivePrimerIdentityScore}
 
 										# Assess if Specific Probe Check is Needed.
 										ProbePass = True
@@ -416,7 +504,6 @@ def IndentifyingAndFilteringOligos(AllParameter,
 												ProbePass = RunFluroProbeAnalysis(NucleotideSeq)
 
 
-
 										if ProbePass == True:
 
 											# Add Run Blastn Check
@@ -425,7 +512,7 @@ def IndentifyingAndFilteringOligos(AllParameter,
 											if AllParameter.BackgroundCheck.upper() != 'NO':
 
 												# Run Blastn Check And If Passess Write Out Set
-												MaxBackgroundScoreBindingScore, MaxScoreBackSeq  = BlastnBackgroundCheck(NucleotideSeq, AllParameter)
+												MaxBackgroundScoreBindingScore, MaxScoreBackSeq, HardFailBool  = BlastnBackgroundCheck(NucleotideSeq, AllParameter)
 
 												# Remove Temp Input File
 												os.remove('{}/{}_Blastn_Input.fa'.format(AllParameter.PrimerBlastnOutput, NucleotideSeq))
@@ -440,6 +527,11 @@ def IndentifyingAndFilteringOligos(AllParameter,
 												else:
 													RowDict['Max Background Cross Reactivity Score'] = MaxBackgroundScoreBindingScore
 													RowDict['Max Background Cross Reactivity SeqID'] = MaxScoreBackSeq
+
+
+												## NEW NEW NEW ## - Check to see if oligo type is primer and then if it failed the hard-fail setting - Possible add parameter into this check as well
+												if (HardFailBool == True and OligoType == 'Primer' and AllParameter.HardCrossReactFilter!='NO'):
+													BlastnPass = False
 
 
 											# If it passed Background Filtering
@@ -497,7 +589,7 @@ def ComboIdentifyier(PrimerSS,ReversePrimerSS,ProbeSS,AllParameter,PassedOligos,
 		MaxComboSSScore = 0
 		MaxComboSSString = ''
 		for SSSCombo in list(itertools.combinations(ComboSeqList,r=2)):
-			SSMaxBindingSites, SSMaxBindingString = SSIdentification(SSSCombo[0],SSSCombo[1],True)
+			SSMaxBindingSites, SSMaxBindingString, IgnoreThresh, IgnoreString = SSIdentification(SSSCombo[0],SSSCombo[1],True)
 
 			if SSMaxBindingSites > MaxComboSSScore:
 				MaxComboSSScore = SSMaxBindingSites
@@ -525,7 +617,8 @@ def ComboIdentifyier(PrimerSS,ReversePrimerSS,ProbeSS,AllParameter,PassedOligos,
 								  'Max Dimerisation Percentage Score':SSMaxBindingSites,
 								  'Max Dimerisation String':MaxComboSSString,
 								  'Forward Primer Length':FPrimerL,
-								  'Reverse Primer Length':RPrimerL
+								  'Reverse Primer Length':RPrimerL,
+								  "Minimum Primer 3' Identity Anchor": min([PassedOligos.loc[RPIndex,'5 prime conserved identity'], PassedOligos.loc[FPIndex,'3 prime conserved identity']])
 								  }
 
 				MaxBackgroundScoresIndexes = [FPIndex,RPIndex]
@@ -573,7 +666,7 @@ def CheckingAlignedOutputFile(AllParameter):
 		PassedOligos = PassedOligos[(PassedOligos['GC_Content']>=AllParameter.MinGC)&
 									(PassedOligos['GC_Content']<=AllParameter.MaxGC)&
 									(PassedOligos['Dimerisation Percentage Score']<=AllParameter.DimerisationThresh)&
-									(PassedOligos['Identity_Score']>=AllParameter.IdentityThreshold)]
+									(PassedOligos['Identity_Score']>=(AllParameter.IdentityThreshold/100))]
 
 
 		# Filter on Primer + Probe Ranges - (Tidy Up At Later Date)
@@ -708,17 +801,23 @@ def CheckingAlignedOutputFile(AllParameter):
 		PossibleProbeLengths = [0]
 
 	# Loop through possible FP  lengths
-	for SFPL in PassedOligos[PassedOligos['Oligo_Type']=='Primer'].loc[:,'Oligo_Length'].unique():
+	if AllParameter.ConservedAnchor == 'NO':
+		AllParameter.ConservedAnchor = 0
+	else:
+		AllParameter.ConservedAnchor = int(AllParameter.ConservedAnchor)
+
+
+	# Loop though Starting Forward Length
+	for SFPL in PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['3 prime conserved identity']>=AllParameter.ConservedAnchor)].loc[:,'Oligo_Length'].unique():
 
 		# Identify all possible FP starting sites
-		PossibleForwardPrimerSS = PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['Oligo_Length']==SFPL)].loc[:,'Binding_Site_Start_Index'].tolist()
+		PossibleForwardPrimerSS = PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['Oligo_Length']==SFPL)&(PassedOligos['3 prime conserved identity']>=AllParameter.ConservedAnchor)].loc[:,'Binding_Site_Start_Index'].tolist()
 
 		# Loop through all possible RP lengths
-		for SRPL in PassedOligos[PassedOligos['Oligo_Type']=='Primer'].loc[:,'Oligo_Length'].unique():
+		for SRPL in PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['5 prime conserved identity']>=AllParameter.ConservedAnchor)].loc[:,'Oligo_Length'].unique():
 
 			# Identify all possible RP starting sites
-			PossibleReversePrimerSS = PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['Oligo_Length']==SRPL)].loc[:,'Binding_Site_Start_Index'].tolist()
-
+			PossibleReversePrimerSS = PassedOligos[(PassedOligos['Oligo_Type']=='Primer')&(PassedOligos['Oligo_Length']==SRPL)&(PassedOligos['5 prime conserved identity']>=AllParameter.ConservedAnchor)].loc[:,'Binding_Site_Start_Index'].tolist()
 
 			# Split FP sites into tranches based on number of threads available.
 			random.shuffle(PossibleForwardPrimerSS)
@@ -796,19 +895,21 @@ try:
 				PriorBindingSite = str(u[2])
 				InputFile = str(u[3])
 				InputFileType = str(u[4])
-				IdentityThreshold = int(u[5])/100
-				PrimerLength = u[6].strip()
-				ProbeRequired = str(u[7]).upper()
-				ProbeLength = u[8].strip()
-				AmpliconSizeLimit = int(u[9])
-				NucleotideRepeatLimit = int(u[10])
-				MinGC = int(u[11])
-				MaxGC = int(u[12])
-				DimerisationThresh = int(u[13])
-				BackgroundCheck = str(u[14])
-				CrossReactivityThresh = int(u[15])
-				MaxSets = int(u[16])
-				Threads = int(u[17])
+				IdentityThreshold = int(u[5])
+				ConservedAnchor = str(u[6]).strip()
+				PrimerLength = u[7].strip()
+				ProbeRequired = str(u[8]).upper()
+				ProbeLength = u[9].strip()
+				AmpliconSizeLimit = int(u[10])
+				NucleotideRepeatLimit = int(u[11])
+				MinGC = int(u[12])
+				MaxGC = int(u[13])
+				DimerisationThresh = int(u[14])
+				BackgroundCheck = str(u[15])
+				CrossReactivityThresh = int(u[16])
+				HardCrossReactFilter = str(u[17])
+				MaxSets = int(u[18])
+				Threads = int(u[19])
 
 
 		except:
@@ -818,12 +919,13 @@ try:
 	else:
 
 		parser = argparse.ArgumentParser()
-		parser.add_argument('--RunID', help='Desired Run ID', required=True)
-		parser.add_argument('--PriorAlign', help='Optional: Path to Prior Binding File',default='NO')
-		parser.add_argument('--PriorBindingSite', help='Optional: Path to Prior Binding File',default='NO')
-		parser.add_argument('--InputFile', help='Path to Input File',default='NO')
-		parser.add_argument('--InputFileType', help='Options [SS,MS,MAS]')
-		parser.add_argument('--IdentityThreshold', help='Desired Identity Threshold',default=0.99)
+		parser.add_argument('--RunID', help='Desired Run ID',type=str, required=True)
+		parser.add_argument('--PriorAlign', help='Optional: Path to Prior Binding File',type=str,default='NO')
+		parser.add_argument('--PriorBindingSite', help='Optional: Path to Prior Binding File',type=str,default='NO')
+		parser.add_argument('--InputFile', help='Path to Input File',type=str,default='NO')
+		parser.add_argument('--InputFileType', help='Options [SS,MS,MAS]',type=str)
+		parser.add_argument('--IdentityThreshold', help='Desired Identity Threshold',type=int,default=100)
+		parser.add_argument('--ConservedAnchor', help='Identity Anchor Required',type=str,default='NO')
 		parser.add_argument('--PrimerLength', help='Desired Primer Length',type=str,default='30')
 		parser.add_argument('--ProbeRequired', help='Options [NO,EXO,NFO]',type=str,default='NO')
 		parser.add_argument('--ProbeLength', help='Desired Probe Length',type=str,default='50')
@@ -832,8 +934,9 @@ try:
 		parser.add_argument('--MinGC', help='Minimum GC Content',type=int,default=30)
 		parser.add_argument('--MaxGC', help='Maximum GC Content',type=int,default=70)
 		parser.add_argument('--DimerisationThresh', help='Percentage Dimerisation Tolerated',type=int,default=40)
-		parser.add_argument('--BackgroundCheck', help='Options [NO, Path To Background Fasta File]',default='NO')
+		parser.add_argument('--BackgroundCheck', help='Options [NO, Path To Background Fasta File]',type=str,default='NO')
 		parser.add_argument('--CrossReactivityThresh', help='Max Cross Reactivity Threshold',type=int,default=60)
+		parser.add_argument('--HardCrossReactFilter', help='Hard Cross Reactivity Filter',type=str,default='NO')
 		parser.add_argument('--MaxSets', help='Default Set To 100',type=int,default=100)
 		parser.add_argument('--Threads', help='Default Set To 1',type=int,default=1)
 		AllParameter = parser.parse_args()
@@ -887,7 +990,7 @@ if AllParameter.BackgroundCheck.upper() != 'NO':
 
 
 # Check If Alignment Is Necessary
-if AllParameter.InputFileType == 'MS':
+if (AllParameter.InputFileType == 'MS' and AllParameter.InputFile != 'NO') :
 
 	# Check if MS Alignment already Exists in Working Directory
 	if AllParameter.InputFile.replace('.fasta','_Aligned.fasta') not in glob.glob(AllParameter.InputFile.replace('.fasta','_Aligned.fasta')):

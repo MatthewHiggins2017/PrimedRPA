@@ -28,6 +28,9 @@ If multiple sequences are present in the input fasta file (Classification of MS 
 percentage identity required for the primers and probes target binding sites:
 >99
 
+Please indicate if a primer identity anchor is required. [NO or length of Anchor]
+>NO
+
 Desired primer length (This can be a range: 28-32 or fixed value: 32):
 >28-32
 
@@ -58,6 +61,10 @@ Please enter [No or Path to Background file] below to identify if you want to pe
 
 Below please insert the percentage background cross reactivity threshold:
 >65
+
+
+Below please indicate if you would like to implement a Background Hard Fail Filter [NO,YES]:
+>NO
 
 Please define the maximum number of sets you would like to identify:
 >5
