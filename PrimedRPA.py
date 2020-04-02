@@ -50,8 +50,6 @@ def FastaToDict(InputFile):
 
 
 
-
-
 # Wrapper for clustal omega
 def RunningClustalo1(ClustalOPath,
 					ListOfFileNames,
@@ -115,10 +113,19 @@ def BlastnBackgroundCheck(seq,AllParameter):
 	tempfastainput.write('>Temp_Blastn_Fasta\n{}\n'.format(seq))
 	tempfastainput.close()
 
+	#
+	if AllParameter.BackgroundSearchSensitivity == 'Basic':
+		Penalty = '-2'
+	else:
+		Penalty = '-1'
+
+
 	#Triggure Blastn command
-	blastncommandrun = '{0} -word_size 4 -gapopen 5 -gapextend 2 -reward 1 -penalty -3  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps sstrand" '.format(AllParameter.BlastnPath,
-																																											 				   seq,																																	 			  	   AllParameter.BlastnDBName,
-																																											 			  	   AllParameter.PrimerBlastnOutput)
+	blastncommandrun = '{0} -word_size 4 -gapopen 5 -gapextend 2 -reward 1 -penalty {4}  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps sstrand" '.format(AllParameter.BlastnPath,
+																																											 				   														seq,
+																																																												 	AllParameter.BlastnDBName,
+																																											 			  	   							 							AllParameter.PrimerBlastnOutput,
+																																																													Penalty)
 	subprocess.call([blastncommandrun],shell=True)
 
 	# Try to read dataframe (may be empty if no alignments found)
@@ -195,20 +202,6 @@ def BlastnBackgroundCheck(seq,AllParameter):
 			blastnoutdf.loc[blastoutindex,'Advanced Cross Reactivity Percentage String'] = BackgroundMaxBindingString
 			blastnoutdf.loc[blastoutindex,'Cross Reactivity Hard Fail'] = BackgroundHardFail
 			blastnoutdf.loc[blastoutindex,'Cross Reactivity Hard Fail String'] = BackgroundString
-
-			'''print('\n\nBackground Check Seq Lengths')
-			print(len(seq))
-			print(len(ComplementSeq))
-			print(blastnoutdf.loc[blastoutindex,:])
-			print(UpperExtension)
-			print(LowerExtension)
-			print(UpperExtension-LowerExtension)
-			print(blastnoutdf.loc[blastoutindex,'Strand'])
-			print(seq)
-			print(ExtraSeq)
-			print(ComplementSeq)
-			print(blastnoutdf.loc[blastoutindex,'Advanced Cross Reactivity Percentage String'])
-			time.sleep(60)'''
 
 
 			# Remove Advance Samtools Generated String
@@ -332,7 +325,6 @@ def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, FixedBack=False ,thresh
 			NumberOfBindingMatches = PossibleBindingString.count('|')
 			CompleteBindingString = DynamicSeq + '\n' + PossibleBindingString + '\n' + VarPair[1]
 
-			########################### NEW ####################################
 
 			# Fixed String
 			if VarPair[1] == SeqOneNorm:
@@ -379,7 +371,6 @@ def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, FixedBack=False ,thresh
 				HardFail = True
 				HardFailString = CompleteBindingString
 
-			########################### NEW ####################################
 
 			if MaxBindingSites < NumberOfBindingMatches:
 				MaxBindingSites = NumberOfBindingMatches
@@ -468,9 +459,6 @@ def IndentifyingAndFilteringOligos(AllParameter,
 					MeanHomologyScore = DFSubSet['IdentityScore'].mean()
 
 
-					############################## NEW ######################### - Triple Check #####################
-					# Determine 3' consective Identity - filter at later date when creating combos
-					# Determine 5' consecutive identity - filter at later date when creating combos
 					IDSList = DFSubSet['IdentityScore'].tolist()
 					OutIDScore = []
 					for IDSO in [IDSList,IDSList[::-1]]:
@@ -485,7 +473,7 @@ def IndentifyingAndFilteringOligos(AllParameter,
 
 					ThreePrimeIdentityScore = OutIDScore[1]
 					FivePrimerIdentityScore = OutIDScore[0]
-					############################## NEW ######################### - Triple Check #####################
+
 
 					if MeanHomologyScore >= AllParameter.IdentityThreshold:
 						NucleotideSeq = ''.join(DFSubSet['Nucleotide'].tolist())
@@ -942,6 +930,7 @@ try:
 				HardCrossReactFilter = str(u[17])
 				MaxSets = int(u[18])
 				Threads = int(u[19])
+				BackgroundSearchSensitivity = str(u[20])
 
 
 		except:
@@ -971,6 +960,7 @@ try:
 		parser.add_argument('--HardCrossReactFilter', help='Hard Cross Reactivity Filter',type=str,default='NO')
 		parser.add_argument('--MaxSets', help='Default Set To 100',type=int,default=100)
 		parser.add_argument('--Threads', help='Default Set To 1',type=int,default=1)
+		parser.add_argument('--BackgroundSearchSensitivity', help='Options [Basic or Advance]',type=str,default='Basic')
 		AllParameter = parser.parse_args()
 
 

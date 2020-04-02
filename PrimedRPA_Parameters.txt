@@ -62,7 +62,6 @@ Please enter [No or Path to Background file] below to identify if you want to pe
 Below please insert the percentage background cross reactivity threshold:
 >65
 
-
 Below please indicate if you would like to implement a Background Hard Fail Filter [NO,YES]:
 >NO
 
@@ -71,3 +70,6 @@ Please define the maximum number of sets you would like to identify:
 
 Please define the number of threads available:
 >1
+
+Blastn Cross Reactivity [Basic or Advance]
+>Advance
