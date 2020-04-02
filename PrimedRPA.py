@@ -5,8 +5,8 @@
 #  Higgins M et al. Submitted. 2018                                 #
 #                                                                   #
 #  Dependencies:                                                    #
-#     Python 3.7													#
-#     Glob 0.6														#
+#     Python 3.7
+#     Glob 0.6
 #     Pandas 0.20.3                                                 #
 #     Sys 3.6.3                                                     #
 #     Bio 1.70                                                      #
@@ -29,7 +29,6 @@ from collections import Counter
 from multiprocessing import Pool
 import argparse
 import re
-from pyfaidx import Fasta as PyFad
 
 
 def FastaToDict(InputFile):
@@ -145,32 +144,47 @@ def BlastnBackgroundCheck(seq,AllParameter):
 			if blastnoutdf.loc[blastoutindex,'Strand']=='plus':
 
 				UpperExtension = (len(seq)-blastnoutdf.loc[blastoutindex,'qEnd']) + blastnoutdf.loc[blastoutindex,'BackSeq_End']
-				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] - blastnoutdf.loc[blastoutindex,'qStart']
+				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] - blastnoutdf.loc[blastoutindex,'qStart']+1
 
 				if LowerExtension<0:
 					LowerExtension = 0
 					ShorterBackground = True
 
+				SamToolsCommand = '{} faidx {} {}:{}-{} -o Adv_{}_{}.fa'.format(AllParameter.SamtoolsPath,
+															   AllParameter.BackgroundCheck,
+															   CleanRefID,
+															   LowerExtension,
+															   UpperExtension,
+															   seq,
+															   CleanRefID)
 
 			# If Background Seq Is (-) Sense
 			else:
 				UpperExtension = blastnoutdf.loc[blastoutindex,'BackSeq_Start'] +  blastnoutdf.loc[blastoutindex,'qStart']-1
-				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_End'] - (len(seq)-blastnoutdf.loc[blastoutindex,'qEnd'])-1
+				LowerExtension = blastnoutdf.loc[blastoutindex,'BackSeq_End'] - (len(seq)-blastnoutdf.loc[blastoutindex,'qEnd'])
 
 
 				if LowerExtension<0:
 					LowerExtension = 0
 					ShorterBackground = True
 
+				SamToolsCommand = '{} faidx -i {} {}:{}-{} -o Adv_{}_{}.fa'.format(AllParameter.SamtoolsPath,
+																			   AllParameter.BackgroundCheck,
+																			   CleanRefID,
+																			   LowerExtension,
+																			   UpperExtension,
+																			   seq,
+																			   CleanRefID)
 
-			TempLoadBackSeq = PyFad(AllParameter.BackgroundCheck)
+			# Run Samtools Command
+			subprocess.call([SamToolsCommand],shell=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
-			if blastnoutdf.loc[blastoutindex,'Strand']=='plus':
-				ExtraSeq = TempLoadBackSeq[CleanRefID][LowerExtension:UpperExtension].seq
-				ComplementSeq = getComplement(ExtraSeq)
-			else:
-				ExtraSeq = TempLoadBackSeq[CleanRefID][LowerExtension:UpperExtension].reverse.complement.seq
-				ComplementSeq = getComplement(ExtraSeq)
+			# Obtain Sequence
+			fastadict = FastaToDict('Adv_{}_{}.fa'.format(seq,CleanRefID))
+
+			# Extract Sequence & Complement
+			ExtraSeq = list(fastadict.values())[0]
+			ComplementSeq = getComplement(ExtraSeq)
 
 
 			# Run SS Check Function
@@ -181,6 +195,24 @@ def BlastnBackgroundCheck(seq,AllParameter):
 			blastnoutdf.loc[blastoutindex,'Advanced Cross Reactivity Percentage String'] = BackgroundMaxBindingString
 			blastnoutdf.loc[blastoutindex,'Cross Reactivity Hard Fail'] = BackgroundHardFail
 			blastnoutdf.loc[blastoutindex,'Cross Reactivity Hard Fail String'] = BackgroundString
+
+			'''print('\n\nBackground Check Seq Lengths')
+			print(len(seq))
+			print(len(ComplementSeq))
+			print(blastnoutdf.loc[blastoutindex,:])
+			print(UpperExtension)
+			print(LowerExtension)
+			print(UpperExtension-LowerExtension)
+			print(blastnoutdf.loc[blastoutindex,'Strand'])
+			print(seq)
+			print(ExtraSeq)
+			print(ComplementSeq)
+			print(blastnoutdf.loc[blastoutindex,'Advanced Cross Reactivity Percentage String'])
+			time.sleep(60)'''
+
+
+			# Remove Advance Samtools Generated String
+			os.remove('Adv_{}_{}.fa'.format(seq,CleanRefID))
 
 
 		blastnoutdf = blastnoutdf.sort_values(by=['Advanced Cross Reactivity Percentage'],ascending=False)
@@ -455,7 +487,7 @@ def IndentifyingAndFilteringOligos(AllParameter,
 					FivePrimerIdentityScore = OutIDScore[0]
 					############################## NEW ######################### - Triple Check #####################
 
-					if MeanHomologyScore >= (AllParameter.IdentityThreshold/100):
+					if MeanHomologyScore >= AllParameter.IdentityThreshold:
 						NucleotideSeq = ''.join(DFSubSet['Nucleotide'].tolist())
 						NucleotideSeq = NucleotideSeq.upper()
 
@@ -666,7 +698,7 @@ def CheckingAlignedOutputFile(AllParameter):
 		PassedOligos = PassedOligos[(PassedOligos['GC_Content']>=AllParameter.MinGC)&
 									(PassedOligos['GC_Content']<=AllParameter.MaxGC)&
 									(PassedOligos['Dimerisation Percentage Score']<=AllParameter.DimerisationThresh)&
-									(PassedOligos['Identity_Score']>=(AllParameter.IdentityThreshold/100))]
+									(PassedOligos['Identity_Score']>=AllParameter.IdentityThreshold)]
 
 
 		# Filter on Primer + Probe Ranges - (Tidy Up At Later Date)
@@ -895,7 +927,7 @@ try:
 				PriorBindingSite = str(u[2])
 				InputFile = str(u[3])
 				InputFileType = str(u[4])
-				IdentityThreshold = int(u[5])
+				IdentityThreshold = int(u[5])/100
 				ConservedAnchor = str(u[6]).strip()
 				PrimerLength = u[7].strip()
 				ProbeRequired = str(u[8]).upper()
@@ -919,12 +951,12 @@ try:
 	else:
 
 		parser = argparse.ArgumentParser()
-		parser.add_argument('--RunID', help='Desired Run ID',type=str, required=True)
-		parser.add_argument('--PriorAlign', help='Optional: Path to Prior Binding File',type=str,default='NO')
-		parser.add_argument('--PriorBindingSite', help='Optional: Path to Prior Binding File',type=str,default='NO')
-		parser.add_argument('--InputFile', help='Path to Input File',type=str,default='NO')
-		parser.add_argument('--InputFileType', help='Options [SS,MS,MAS]',type=str)
-		parser.add_argument('--IdentityThreshold', help='Desired Identity Threshold',type=int,default=100)
+		parser.add_argument('--RunID', help='Desired Run ID', required=True)
+		parser.add_argument('--PriorAlign', help='Optional: Path to Prior Binding File',default='NO')
+		parser.add_argument('--PriorBindingSite', help='Optional: Path to Prior Binding File',default='NO')
+		parser.add_argument('--InputFile', help='Path to Input File',default='NO')
+		parser.add_argument('--InputFileType', help='Options [SS,MS,MAS]')
+		parser.add_argument('--IdentityThreshold', help='Desired Identity Threshold',default=0.99)
 		parser.add_argument('--ConservedAnchor', help='Identity Anchor Required',type=str,default='NO')
 		parser.add_argument('--PrimerLength', help='Desired Primer Length',type=str,default='30')
 		parser.add_argument('--ProbeRequired', help='Options [NO,EXO,NFO]',type=str,default='NO')
@@ -934,7 +966,7 @@ try:
 		parser.add_argument('--MinGC', help='Minimum GC Content',type=int,default=30)
 		parser.add_argument('--MaxGC', help='Maximum GC Content',type=int,default=70)
 		parser.add_argument('--DimerisationThresh', help='Percentage Dimerisation Tolerated',type=int,default=40)
-		parser.add_argument('--BackgroundCheck', help='Options [NO, Path To Background Fasta File]',type=str,default='NO')
+		parser.add_argument('--BackgroundCheck', help='Options [NO, Path To Background Fasta File]',default='NO')
 		parser.add_argument('--CrossReactivityThresh', help='Max Cross Reactivity Threshold',type=int,default=60)
 		parser.add_argument('--HardCrossReactFilter', help='Hard Cross Reactivity Filter',type=str,default='NO')
 		parser.add_argument('--MaxSets', help='Default Set To 100',type=int,default=100)

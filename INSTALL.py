@@ -5,7 +5,7 @@ import subprocess
 
 PackList = ['os','shutil','sys','pandas',
             'math','glob','time','itertools',
-            'datetime','random','numpy','multiprocess','pyfaidx']
+            'datetime','random','numpy','multiprocess']
 
 
 # Checking Package Installation and if not present install
@@ -53,6 +53,11 @@ elif OperatingSystem == "win32" or 'win64':
 
 for dp in ['clustalo','blastn','makeblastdb']:
     subprocess.run('chmod u+x ./Tool_Dependancies/{}'.format(dp),shell=True)
+
+
+# Install And Establish Samtools - Commands Shown Below
+SamtoolsInstall = 'cd {0}/Tool_Dependancies/ ;wget https://github.com/samtools/samtools/releases/download/1.10/samtools-1.10.tar.bz2 ;tar -xf samtools-1.10.tar.bz2; cd ./samtools-1.10 ; ./configure --prefix=/{0}/Tool_Dependancies/; make; make install; chmod u+x {0}/Tool_Dependancies/bin/samtools; cd {0}'.format(PrimedRPAPath)
+subprocess.run(SamtoolsInstall,shell=True)
 
 
 
