@@ -794,8 +794,10 @@ def CheckingAlignedOutputFile(AllParameter):
 			HDFLST = list(range(FastaSeqLength))
 			HomoDFInputIndexBlocks = [HDFLST[i:i + AllParameter.Threads] for i in range(0, len(HDFLST), AllParameter.Threads)]
 			MTDFOVI = list(zip([fastadict]*len(HomoDFInputIndexBlocks),HomoDFInputIndexBlocks))
-			with Pool(processes=AllParameter.Threads) as pool:
-				AlignedDFMultiThreadOupt = pool.starmap(CreatingInputHomologyDF,MTDFOVI)
+
+			if __name__ == '__main__':
+				with Pool(processes=AllParameter.Threads) as pool:
+					AlignedDFMultiThreadOupt = pool.starmap(CreatingInputHomologyDF,MTDFOVI)
 			MergedAlignedDF = pd.concat(AlignedDFMultiThreadOupt).reset_index().drop(['index'],axis=1)
 			MergedAlignedDF = MergedAlignedDF.sort_values(by=['Index_Pos'])
 			MergedAlignedDF.to_csv('{}_Alignment_Summary.csv'.format(AllParameter.RunID),index=None)
@@ -806,8 +808,10 @@ def CheckingAlignedOutputFile(AllParameter):
 		PrimerProbeCheckParallelInput = list(zip([AllParameter]*len(HomoDFInputIndexBlocks),
 												 [MergedAlignedDF]*len(HomoDFInputIndexBlocks),
 												 HomoDFInputIndexBlocks))
-		with Pool(processes=AllParameter.Threads) as pool:
-			PotentialPrimerProbeOut = pool.starmap(IndentifyingAndFilteringOligos,PrimerProbeCheckParallelInput)
+
+		if __name__ == '__main__':
+			with Pool(processes=AllParameter.Threads) as pool:
+				PotentialPrimerProbeOut = pool.starmap(IndentifyingAndFilteringOligos,PrimerProbeCheckParallelInput)
 
 
 		PassedOligos =  pd.concat(PotentialPrimerProbeOut).reset_index().drop(['index'],axis=1)
@@ -875,9 +879,9 @@ def CheckingAlignedOutputFile(AllParameter):
 												  [PPL]*len(PSST)))
 
 
-
-						with Pool(processes=AllParameter.Threads) as pool:
-							SuccessfulSets = pool.starmap(ComboIdentifyier,ComboSearchInput)
+						if __name__ == '__main__':
+							with Pool(processes=AllParameter.Threads) as pool:
+								SuccessfulSets = pool.starmap(ComboIdentifyier,ComboSearchInput)
 
 						TempOutputDF = pd.concat(SuccessfulSets)
 						FinalOutputDF = pd.concat([FinalOutputDF,TempOutputDF])
@@ -1033,6 +1037,3 @@ if (AllParameter.InputFileType == 'MS' and AllParameter.InputFile != 'NO') :
 
 # Run Primer, Probe Design process
 CheckingAlignedOutputFile(AllParameter)
-
-
-print(datetime.now())
