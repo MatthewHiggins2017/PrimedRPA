@@ -38,6 +38,8 @@ if OperatingSystem in ["linux","linux2"]:
         subprocess.run('mv Tool_Dependancies_Linux Tool_Dependancies',shell=True)
     AliasFile = 'bashrc'
 
+    Downloader = 'wget'
+
 elif OperatingSystem == "darwin":
     print('Darwin Operating System Detected')
 
@@ -45,6 +47,8 @@ elif OperatingSystem == "darwin":
         shutil.rmtree('./Tool_Dependancies_Linux')
         subprocess.run('mv Tool_Dependancies_Mac Tool_Dependancies',shell=True)
     AliasFile = 'bash_profile'
+
+    Downloader = 'curl -O'
 
 elif OperatingSystem == "win32" or 'win64':
     print('Windows Operating System Detected\n\
@@ -56,7 +60,7 @@ for dp in ['clustalo','blastn','makeblastdb']:
 
 
 # Install And Establish Samtools - Commands Shown Below
-SamtoolsInstall = 'cd {0}/Tool_Dependancies/ ;wget https://github.com/samtools/samtools/releases/download/1.10/samtools-1.10.tar.bz2 ;tar -xf samtools-1.10.tar.bz2; cd ./samtools-1.10 ; ./configure --prefix=/{0}/Tool_Dependancies/; make; make install; chmod u+x {0}/Tool_Dependancies/bin/samtools; cd {0}'.format(PrimedRPAPath)
+SamtoolsInstall = 'cd {0}/Tool_Dependancies/ ;{1} https://github.com/samtools/samtools/releases/download/1.10/samtools-1.10.tar.bz2 ;tar -xf samtools-1.10.tar.bz2; cd ./samtools-1.10 ; ./configure --prefix=/{0}/Tool_Dependancies/; make; make install; chmod u+x {0}/Tool_Dependancies/bin/samtools; cd {0}'.format(PrimedRPAPath,Downloader)
 subprocess.run(SamtoolsInstall,shell=True)
 
 
