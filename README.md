@@ -57,9 +57,11 @@ Please see the wiki for more information, including a step-by-step walk through 
 
 PrimerRPA incorporates the following 3rd party software:
 
-Clustal Omega (http://www.clustal.org/omega/) - For sequence alignment if necessary.<br/>
-Blastn (https://blast.ncbi.nlm.nih.gov/Blast.cgi)- To assess primer/probe cross reactivity against potential background sequences.
+* Clustal Omega (http://www.clustal.org/omega/) - For sequence alignment if necessary.<br/>
+* Blastn (https://blast.ncbi.nlm.nih.gov/Blast.cgi)- To assess primer/probe cross reactivity against potential background sequences.
+* Samtools (http://www.htslib.org/) - To assess primer/probe cross reactivity. 
 
+Please ensure you have downloaded all necessary dependencies for these 3rd-party programs (https://www.biostars.org/p/328831/). 
 
 
 ### Contact
