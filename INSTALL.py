@@ -48,7 +48,7 @@ elif OperatingSystem == "darwin":
         subprocess.run('mv Tool_Dependancies_Mac Tool_Dependancies',shell=True)
     AliasFile = 'bash_profile'
 
-    Downloader = 'curl -O'
+    Downloader = 'curl -LJO'
 
 elif OperatingSystem == "win32" or 'win64':
     print('Windows Operating System Detected\n\
