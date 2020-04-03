@@ -21,7 +21,7 @@ import glob
 import time
 import subprocess
 import itertools
-import datetime
+from datetime import datetime
 import random
 import numpy
 import pandas as pd
@@ -113,19 +113,28 @@ def BlastnBackgroundCheck(seq,AllParameter):
 	tempfastainput.write('>Temp_Blastn_Fasta\n{}\n'.format(seq))
 	tempfastainput.close()
 
-	#
-	if AllParameter.BackgroundSearchSensitivity == 'Basic':
-		Penalty = '-2'
-	else:
+
+	# Parameters default for basic run
+	Penalty = '-2'
+	WordSize = '4'
+	if AllParameter.BackgroundSearchSensitivity == 'Advanced':
 		Penalty = '-1'
+
+	elif AllParameter.BackgroundSearchSensitivity == 'Fast':
+		Penalty = '-3'
+		WordSize = '7'
+
 
 
 	#Triggure Blastn command
-	blastncommandrun = '{0} -word_size 4 -gapopen 5 -gapextend 2 -reward 1 -penalty {4}  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps sstrand" '.format(AllParameter.BlastnPath,
+	blastncommandrun = '{0} -word_size {5} -gapopen 5 -gapextend 2 -reward 1 -penalty {4}  -query  {3}/{1}_Blastn_Input.fa -db {2}/{2} -out {3}/{1}_Blastn_Output.csv -outfmt "10 sseqid pident qstart qend sstart send evalue gaps sstrand" '.format(AllParameter.BlastnPath,
 																																											 				   														seq,
 																																																												 	AllParameter.BlastnDBName,
 																																											 			  	   							 							AllParameter.PrimerBlastnOutput,
-																																																													Penalty)
+																																																													Penalty,
+																																																													WordSize)
+
+
 	subprocess.call([blastncommandrun],shell=True)
 
 	# Try to read dataframe (may be empty if no alignments found)
@@ -227,6 +236,7 @@ def BlastnBackgroundCheck(seq,AllParameter):
 	if MaximumPercentageMatch > MaxBackgroundScoreBindingScore:
 		MaxBackgroundScoreBindingScore = MaximumPercentageMatch
 		MaxScoreBackSeq = MaxHomologyBackgroundSeq
+
 
 	return (MaxBackgroundScoreBindingScore, MaxScoreBackSeq, HardFailBoolean)
 
@@ -360,7 +370,7 @@ def SSIdentification(SeqOne, SeqTwo, ReverseOrientation, FixedBack=False ,thresh
 
 			AdjustedWeights = []
 			for ib in [0,1]:
-				TempScore = OriginalScore[ib].count('|')
+				TempScore = OriginalScore[ib].count('|') - OriginalScore[ib].count('-')
 				Indexes = IndexLocations[ib]
 				for iz in list(zip(Indexes,weightings)):
 					if OriginalScore[ib][iz[0]] == '|':
@@ -960,7 +970,7 @@ try:
 		parser.add_argument('--HardCrossReactFilter', help='Hard Cross Reactivity Filter',type=str,default='NO')
 		parser.add_argument('--MaxSets', help='Default Set To 100',type=int,default=100)
 		parser.add_argument('--Threads', help='Default Set To 1',type=int,default=1)
-		parser.add_argument('--BackgroundSearchSensitivity', help='Options [Basic or Advance]',type=str,default='Basic')
+		parser.add_argument('--BackgroundSearchSensitivity', help='Options [Basic or Advanced or Fast]',type=str,default='Basic')
 		AllParameter = parser.parse_args()
 
 
@@ -1023,3 +1033,6 @@ if (AllParameter.InputFileType == 'MS' and AllParameter.InputFile != 'NO') :
 
 # Run Primer, Probe Design process
 CheckingAlignedOutputFile(AllParameter)
+
+
+print(datetime.now())

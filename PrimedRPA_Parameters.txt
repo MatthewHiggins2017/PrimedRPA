@@ -28,7 +28,7 @@ If multiple sequences are present in the input fasta file (Classification of MS 
 percentage identity required for the primers and probes target binding sites:
 >99
 
-Please indicate if a primer identity anchor is required. [NO or length of Anchor]
+Please indicate if a primer identity anchor is required. [NO or length of anchor]
 >NO
 
 Desired primer length (This can be a range: 28-32 or fixed value: 32):
@@ -71,5 +71,5 @@ Please define the maximum number of sets you would like to identify:
 Please define the number of threads available:
 >1
 
-Blastn Cross Reactivity [Basic or Advance]
->Advance
+Blastn Cross Reactivity Search Settings [Basic or Advanced or Fast]
+>Fast
